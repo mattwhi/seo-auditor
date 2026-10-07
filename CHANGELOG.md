@@ -2,12 +2,18 @@
 
 ## [Unreleased]
 
-### v0.3.0 RC1
+## [0.3.0] - 2026-10-07
 
-- Prepared the v0.3 release candidate after successful real-world end-to-end auditing.
-- Fixed the audit selector so the selected audit reflects its latest polled status instead of stale history data.
-- Replaced the development slice badge with the v0.3.0 RC1 release identifier.
-- Includes the Slice 5C scoring and false-positive hardening validated against a fresh 224-page audit.
+- Added the deterministic SEO Rule Engine with stable namespaced rule IDs, validated rule registration and fail-fast finding contracts.
+- Added core technical SEO rules covering HTTP status, redirects, metadata, headings, indexability, canonicals and crawl evidence.
+- Persisted page facts and SEO findings atomically, with idempotent audit retries and paginated findings/pages APIs.
+- Added the browser audit workflow for project creation, audit execution, live status polling and audit history.
+- Added the Results Explorer with Overview, Issues, Pages and Crawl Failures views.
+- Added aggregated issue prioritisation, affected-URL drill-down, deterministic evidence, search/filtering, pagination and remediation guidance.
+- Added prevalence-aware SEO scoring so repeated findings scale by affected-page coverage rather than forcing large crawls to zero.
+- Reclassified intent-dependent noindex findings as informational and suppressed cascading metadata/content findings on noindex, non-HTML and non-success responses.
+- Validated the release candidate through repeated end-to-end 224-page real-world audits.
+- Promoted v0.3.0 RC1 to the v0.3.0 pre-alpha release with no functional crawler, rule, scoring or dashboard changes.
 
 ### v0.3 Slice 5B
 
