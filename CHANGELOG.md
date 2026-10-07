@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### v0.3 Slice 5B
+
+- Added issue drill-down workspaces with affected URL tables and deterministic evidence inspection.
+- Added human-authored issue titles, Why this matters guidance, and remediation guidance while preserving stable rule IDs.
+- Added issue severity/category/search filters, affected-URL search and pagination, and page search/pagination.
+
 ### v0.3 development — Slice 5A
 
 - Restructured audit results into Overview, Issues, Pages, and Crawl Failures views.
