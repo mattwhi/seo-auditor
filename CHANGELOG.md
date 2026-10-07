@@ -34,6 +34,14 @@
 - Added fail-fast validation that finding ID, severity and category match rule metadata
 - Added dedicated rule-engine contract tests and expanded rule authoring documentation
 
+## v0.3 development — Slice 5C
+
+- Reworked audit scoring so repeated findings scale by affected-page prevalence instead of forcing large crawls to zero.
+- Informational findings no longer reduce the SEO score.
+- Reclassified noindex directives as informational because intent cannot be inferred from crawl evidence alone.
+- Suppressed missing canonical, metadata, heading and thin-content findings on noindex pages.
+- Suppressed page-content SEO rules for non-HTML and non-success responses to reduce cascading false positives.
+
 ## [0.2.1] - 2026-10-07
 
 - Updated the web milestone page to reflect the completed v0.2 crawler release

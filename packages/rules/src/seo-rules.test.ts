@@ -148,3 +148,33 @@ test('reports empty H1 elements separately from a missing H1', () => {
   });
   assert.ok(!findings.some((item) => item.ruleId === 'heading.h1-missing'));
 });
+
+test('does not report missing canonical or metadata findings for noindex pages', () => {
+  const findings = evaluatePage(
+    basePage({ robots: ['noindex'], canonical: null, title: null, metaDescription: null, h1: [] }),
+  );
+  assert.ok(findings.some((item) => item.ruleId === 'indexability.noindex'));
+  assert.ok(!findings.some((item) => item.ruleId === 'indexability.canonical-missing'));
+  assert.ok(!findings.some((item) => item.ruleId === 'title.missing'));
+  assert.ok(!findings.some((item) => item.ruleId === 'description.missing'));
+  assert.ok(!findings.some((item) => item.ruleId === 'heading.h1-missing'));
+});
+
+test('does not report page-content SEO findings for non-HTML or error responses', () => {
+  for (const page of [
+    basePage({ statusCode: 404, canonical: null, title: null, metaDescription: null, h1: [] }),
+    basePage({
+      contentType: 'application/pdf',
+      canonical: null,
+      title: null,
+      metaDescription: null,
+      h1: [],
+    }),
+  ]) {
+    const findings = evaluatePage(page);
+    assert.ok(!findings.some((item) => item.ruleId === 'indexability.canonical-missing'));
+    assert.ok(!findings.some((item) => item.ruleId === 'title.missing'));
+    assert.ok(!findings.some((item) => item.ruleId === 'description.missing'));
+    assert.ok(!findings.some((item) => item.ruleId === 'heading.h1-missing'));
+  }
+});

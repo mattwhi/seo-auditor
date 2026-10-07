@@ -33,6 +33,17 @@ const resolveCanonical = (canonical: string, finalUrl: string): string | null =>
   }
 };
 
+const isHtmlSuccess = (page: PageFacts): boolean =>
+  page.statusCode >= 200 &&
+  page.statusCode <= 299 &&
+  (page.contentType ?? '').toLowerCase().includes('text/html');
+
+const isNoindex = (page: PageFacts): boolean =>
+  hasDirective(page.robots, 'noindex') || hasDirective(page.xRobotsTag, 'noindex');
+
+const isIndexableHtmlCandidate = (page: PageFacts): boolean =>
+  isHtmlSuccess(page) && !isNoindex(page);
+
 export const coreRules: readonly SeoRule[] = Object.freeze([
   {
     id: 'status.server-error',
@@ -105,7 +116,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'high',
     category: 'metadata',
     evaluate(page) {
-      return page.title ? [] : [finding(this)];
+      return !isIndexableHtmlCandidate(page) || page.title ? [] : [finding(this)];
     },
   },
   {
@@ -115,7 +126,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'low',
     category: 'metadata',
     evaluate(page) {
-      if (!page.title || page.title.length >= 30) return [];
+      if (!isIndexableHtmlCandidate(page) || !page.title || page.title.length >= 30) return [];
       return [finding(this, { evidence: { length: page.title.length, title: page.title } })];
     },
   },
@@ -126,7 +137,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'low',
     category: 'metadata',
     evaluate(page) {
-      if (!page.title || page.title.length <= 60) return [];
+      if (!isIndexableHtmlCandidate(page) || !page.title || page.title.length <= 60) return [];
       return [finding(this, { evidence: { length: page.title.length, title: page.title } })];
     },
   },
@@ -137,7 +148,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'medium',
     category: 'metadata',
     evaluate(page) {
-      return page.metaDescription ? [] : [finding(this)];
+      return !isIndexableHtmlCandidate(page) || page.metaDescription ? [] : [finding(this)];
     },
   },
   {
@@ -147,7 +158,12 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'low',
     category: 'metadata',
     evaluate(page) {
-      if (!page.metaDescription || page.metaDescription.length >= 70) return [];
+      if (
+        !isIndexableHtmlCandidate(page) ||
+        !page.metaDescription ||
+        page.metaDescription.length >= 70
+      )
+        return [];
       return [
         finding(this, {
           evidence: { length: page.metaDescription.length, description: page.metaDescription },
@@ -162,7 +178,12 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'low',
     category: 'metadata',
     evaluate(page) {
-      if (!page.metaDescription || page.metaDescription.length <= 160) return [];
+      if (
+        !isIndexableHtmlCandidate(page) ||
+        !page.metaDescription ||
+        page.metaDescription.length <= 160
+      )
+        return [];
       return [
         finding(this, {
           evidence: { length: page.metaDescription.length, description: page.metaDescription },
@@ -177,7 +198,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'high',
     category: 'headings',
     evaluate(page) {
-      return page.h1.length ? [] : [finding(this)];
+      return !isIndexableHtmlCandidate(page) || page.h1.length ? [] : [finding(this)];
     },
   },
   {
@@ -187,6 +208,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'medium',
     category: 'headings',
     evaluate(page) {
+      if (!isIndexableHtmlCandidate(page)) return [];
       const count = page.h1.filter((value) => !value.trim()).length;
       return count ? [finding(this, { evidence: { count } })] : [];
     },
@@ -198,14 +220,16 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'medium',
     category: 'headings',
     evaluate(page) {
-      return page.h1.length > 1 ? [finding(this, { evidence: { count: page.h1.length } })] : [];
+      return isIndexableHtmlCandidate(page) && page.h1.length > 1
+        ? [finding(this, { evidence: { count: page.h1.length } })]
+        : [];
     },
   },
   {
     id: 'indexability.noindex',
     name: 'Noindex directive',
-    description: 'Page contains a noindex robots directive.',
-    severity: 'high',
+    description: 'Page contains a noindex robots directive. Verify that exclusion is intentional.',
+    severity: 'info',
     category: 'indexability',
     evaluate(page) {
       return hasDirective(page.robots, 'noindex')
@@ -216,8 +240,8 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
   {
     id: 'indexability.x-robots-noindex',
     name: 'X-Robots-Tag noindex directive',
-    description: 'HTTP response contains a noindex X-Robots-Tag directive.',
-    severity: 'high',
+    description: 'HTTP response contains a noindex X-Robots-Tag directive. Verify that exclusion is intentional.',
+    severity: 'info',
     category: 'indexability',
     evaluate(page) {
       return hasDirective(page.xRobotsTag, 'noindex')
@@ -236,7 +260,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'medium',
     category: 'indexability',
     evaluate(page) {
-      return page.canonical ? [] : [finding(this)];
+      return !isIndexableHtmlCandidate(page) || page.canonical ? [] : [finding(this)];
     },
   },
   {
@@ -246,7 +270,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'high',
     category: 'indexability',
     evaluate(page) {
-      if (!page.canonical) return [];
+      if (!isHtmlSuccess(page) || !page.canonical) return [];
       return resolveCanonical(page.canonical, page.finalUrl)
         ? []
         : [finding(this, { evidence: { canonical: page.canonical } })];
@@ -259,7 +283,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'info',
     category: 'indexability',
     evaluate(page) {
-      if (!page.canonical) return [];
+      if (!isHtmlSuccess(page) || !page.canonical) return [];
       const canonical = resolveCanonical(page.canonical, page.finalUrl);
       if (!canonical || canonical === page.finalUrl) return [];
       return [finding(this, { evidence: { canonical, finalUrl: page.finalUrl } })];
@@ -272,7 +296,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     severity: 'low',
     category: 'content',
     evaluate(page) {
-      return page.wordCount < 200
+      return isIndexableHtmlCandidate(page) && page.wordCount < 200
         ? [finding(this, { evidence: { wordCount: page.wordCount } })]
         : [];
     },

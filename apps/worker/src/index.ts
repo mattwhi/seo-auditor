@@ -24,6 +24,7 @@ new Worker<CrawlJob>(
     });
 
     const findings: RuleFinding[] = [];
+    let pageCount = 0;
 
     try {
       // A BullMQ retry must produce the same persisted audit result rather than
@@ -108,6 +109,7 @@ new Worker<CrawlJob>(
           });
 
           findings.push(...pageFindings);
+          pageCount += 1;
         },
       });
 
@@ -118,7 +120,7 @@ new Worker<CrawlJob>(
         data: {
           status: 'completed',
           completedAt: new Date(),
-          score: score(findings),
+          score: score(findings, pageCount),
         },
       });
     } catch (error) {
