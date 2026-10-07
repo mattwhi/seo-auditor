@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  name      String
+  baseUrl   String
+  createdAt DateTime @default(now())
+
+  audits Audit[]
+}
+
+model Audit {
+  id          String    @id @default(cuid())
+  projectId   String
+  status      String    @default("queued")
+  score       Int?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pages   Page[]
+  issues  Issue[]
+
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Page {
+  id              String  @id @default(cuid())
+  auditId         String
+  url             String
+  finalUrl        String
+  statusCode      Int
+  responseTimeMs  Int
+  title           String?
+  metaDescription String?
+  canonical       String?
+  robots          String[]
+  h1              String[]
+  h2              String[]
+  wordCount       Int
+  schemaTypes     String[]
+
+  audit  Audit   @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  issues Issue[]
+
+  @@unique([auditId, url])
+  @@index([auditId])
+  @@index([statusCode])
+}
+
+model Issue {
+  id       String  @id @default(cuid())
+  auditId  String
+  pageId   String?
+  ruleId   String
+  severity String
+  category String
+  message  String
+  evidence Json?
+
+  audit Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  page  Page? @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([pageId])
+  @@index([auditId, ruleId])
+  @@index([severity])
+}

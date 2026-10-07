@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: seo
+      POSTGRES_PASSWORD: seo
+      POSTGRES_DB: seo_auditor
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U seo -d seo_auditor']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
+      REDIS_URL: redis://redis:6379
+    command: ['pnpm', '--filter', '@seo-auditor/database', 'exec', 'prisma', 'db', 'push']
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
+      REDIS_URL: redis://redis:6379
+      SERVICE_NAME: api
+    command: ['pnpm', '--filter', '@seo-auditor/api', 'start']
+    ports:
+      - '4000:4000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
+      REDIS_URL: redis://redis:6379
+      SERVICE_NAME: worker
+    command: ['pnpm', '--filter', '@seo-auditor/worker', 'start']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    build: .
+    env_file:
+      - .env
+    command: ['pnpm', '--filter', '@seo-auditor/web', 'start']
+    ports:
+      - '3000:3000'
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  redis_data:

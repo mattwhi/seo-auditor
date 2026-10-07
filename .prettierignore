@@ -1,0 +1,25 @@
+node_modules
+.next
+dist
+coverage
+.pnpm-store
+
+# Generated
+packages/database/node_modules
+packages/database/prisma/migrations
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Package managers
+pnpm-lock.yaml
+
+# OS / IDE
+.DS_Store
+.idea
+.vscode

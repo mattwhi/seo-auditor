@@ -1,0 +1,26 @@
+{
+  "name": "@seo-auditor/api",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@seo-auditor/config": "workspace:*",
+    "@seo-auditor/database": "workspace:*",
+    "@seo-auditor/logger": "workspace:*",
+    "@seo-auditor/queue": "workspace:*",
+    "fastify": "^5.6.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

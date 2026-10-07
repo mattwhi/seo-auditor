@@ -1,0 +1,27 @@
+{
+  "name": "@seo-auditor/worker",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@seo-auditor/config": "workspace:*",
+    "@seo-auditor/crawler": "workspace:*",
+    "@seo-auditor/database": "workspace:*",
+    "@seo-auditor/rules": "workspace:*",
+    "@seo-auditor/scoring": "workspace:*",
+    "@seo-auditor/queue": "workspace:*",
+    "@seo-auditor/types": "workspace:*",
+    "bullmq": "^5.61.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
