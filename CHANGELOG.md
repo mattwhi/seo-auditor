@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-10-07
+
+- Updated the web milestone page to reflect the completed v0.2 crawler release
+- Updated the next milestone to the v0.3 SEO Rule Engine
+- Changed API health version reporting to derive from the API package version instead of a hard-coded value
+- Aligned workspace package versions at 0.2.1
+
 ## [0.2.0] - 2026-10-07
 
 - Added conservative URL normalization and same-origin crawl controls

@@ -6,7 +6,7 @@ import { makeAuditQueue } from '@seo-auditor/queue';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
-app.get('/health', async () => ({ status: 'ok', version: '0.1.0' }));
+app.get('/health', async () => ({ status: 'ok', version: process.env.npm_package_version ?? 'unknown' }));
 app.get('/ready', async (_req, reply) => {
   try {
     await db.$queryRaw`SELECT 1`;

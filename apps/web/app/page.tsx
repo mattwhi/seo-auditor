@@ -7,7 +7,7 @@ export default function Home() {
           <h1>SEO Auditor</h1>
           <p>Self-hosted technical SEO crawling, auditing and regression monitoring.</p>
         </div>
-        <div className="score">v0.1</div>
+        <div className="score">v0.2.1</div>
       </header>
       <section className="grid">
         <article>
@@ -28,10 +28,11 @@ export default function Home() {
         </article>
       </section>
       <section className="panel">
-        <h2>Foundation milestone</h2>
+        <h2>Crawler milestone</h2>
         <p>
-          The industrialized base is running. Next milestone: crawl controls, robots.txt, sitemap
-          discovery, persisted crawl errors and the audit dashboard.
+          The responsible crawler is running with robots.txt enforcement, sitemap discovery, crawl
+          budgets, rate limiting, retries, redirect tracking and persisted crawl evidence. Next
+          milestone: the SEO Rule Engine.
         </p>
         <code>docker compose up --build</code>
       </section>
