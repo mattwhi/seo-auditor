@@ -40,17 +40,7 @@ app.post('/api/v1/projects/:projectId/audits', async (req, reply) => {
   const p = z.object({ projectId: z.string() }).parse(req.params);
   const project = await db.project.findUnique({ where: { id: p.projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  const audit = await db.audit.create({ data: { projectId: project.id } });
-  await queue.add(
-    'crawl',
-    {
-      auditId: audit.id,
-      projectId: project.id,
-      startUrl: project.baseUrl,
-      maxUrls: config.CRAWLER_MAX_URLS,
-    },
-    { jobId: audit.id },
-  );
+  const audit = await enqueueAudit(project.id, 'manual');
   return reply.code(202).send(audit);
 });
 const auditIdParams = z.object({ auditId: z.string().min(1) });
@@ -296,5 +286,108 @@ app.get('/api/v1/pages/:pageId/issues', async (req, reply) => {
   });
   return { page, issues };
 });
+
+
+const projectIdParams = z.object({ projectId: z.string().min(1) });
+
+function nextScheduleRun(frequency: string, hourUtc: number, dayOfWeek?: number | null, dayOfMonth?: number | null, from = new Date()) {
+  const next = new Date(from);
+  next.setUTCMinutes(0, 0, 0);
+  next.setUTCHours(hourUtc);
+  if (next <= from) next.setUTCDate(next.getUTCDate() + 1);
+  if (frequency === 'weekly') {
+    const target = dayOfWeek ?? 1;
+    while (next.getUTCDay() !== target) next.setUTCDate(next.getUTCDate() + 1);
+  } else if (frequency === 'monthly') {
+    const target = Math.min(28, Math.max(1, dayOfMonth ?? 1));
+    next.setUTCDate(target);
+    if (next <= from) next.setUTCMonth(next.getUTCMonth() + 1);
+  }
+  return next;
+}
+
+async function enqueueAudit(projectId: string, trigger: 'manual' | 'scheduled' = 'manual') {
+  const project = await db.project.findUnique({ where: { id: projectId } });
+  if (!project) return null;
+  const active = await db.audit.findFirst({ where: { projectId, status: { in: ['queued', 'running'] } } });
+  if (active) return active;
+  const audit = await db.audit.create({ data: { projectId, trigger } });
+  await queue.add('crawl', { auditId: audit.id, projectId, startUrl: project.baseUrl, maxUrls: config.CRAWLER_MAX_URLS }, { jobId: audit.id });
+  return audit;
+}
+
+app.get('/api/v1/projects/:projectId/platform', async (req, reply) => {
+  const { projectId } = projectIdParams.parse(req.params);
+  const project = await db.project.findUnique({ where: { id: projectId }, include: { schedule: true } });
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  const audits = await db.audit.findMany({ where: { projectId, status: 'completed' }, orderBy: { createdAt: 'desc' }, take: 30, include: { _count: { select: { pages: true, issues: true, crawlFailures: true } } } });
+  const latest = audits[0] ?? null;
+  const previous = audits[1] ?? null;
+  let regression = null;
+  if (latest && previous) {
+    const load = (id: string) => db.audit.findUniqueOrThrow({ where: { id }, select: { id:true, projectId:true, status:true, score:true, pages:{select:{url:true,finalUrl:true}}, issues:{select:{ruleId:true,severity:true,category:true,message:true,evidence:true,page:{select:{url:true,finalUrl:true}}}} } });
+    regression = compareAudits(await load(latest.id), await load(previous.id));
+  }
+  return { project, schedule: project.schedule, audits, latest, previous, regression };
+});
+
+app.put('/api/v1/projects/:projectId/schedule', async (req, reply) => {
+  const { projectId } = projectIdParams.parse(req.params);
+  const body = z.object({ enabled: z.boolean(), frequency: z.enum(['daily','weekly','monthly']), hourUtc: z.number().int().min(0).max(23), dayOfWeek: z.number().int().min(0).max(6).nullable().optional(), dayOfMonth: z.number().int().min(1).max(28).nullable().optional() }).parse(req.body);
+  const project = await db.project.findUnique({ where: { id: projectId } });
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  const nextRunAt = body.enabled ? nextScheduleRun(body.frequency, body.hourUtc, body.dayOfWeek, body.dayOfMonth) : null;
+  return db.auditSchedule.upsert({ where: { projectId }, create: { projectId, ...body, nextRunAt }, update: { ...body, nextRunAt } });
+});
+
+app.patch('/api/v1/projects/:projectId', async (req, reply) => {
+  const { projectId } = projectIdParams.parse(req.params);
+  const body = z.object({ retentionDays: z.number().int().min(7).max(3650) }).parse(req.body);
+  try { return await db.project.update({ where: { id: projectId }, data: body }); } catch { return reply.code(404).send({ error: 'project_not_found' }); }
+});
+
+app.delete('/api/v1/projects/:projectId', async (req, reply) => {
+  const { projectId } = projectIdParams.parse(req.params);
+  try { await db.project.delete({ where: { id: projectId } }); return reply.code(204).send(); } catch { return reply.code(404).send({ error: 'project_not_found' }); }
+});
+
+app.post('/api/v1/audits/:auditId/cancel', async (req, reply) => {
+  const { auditId } = auditIdParams.parse(req.params);
+  const audit = await db.audit.findUnique({ where: { id: auditId } });
+  if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
+  if (!['queued','running'].includes(audit.status)) return reply.code(409).send({ error: 'audit_not_active' });
+  if (audit.status === 'queued') {
+    const job = await queue.getJob(auditId); await job?.remove();
+    return db.audit.update({ where: { id: auditId }, data: { status: 'cancelled', cancelRequested: true, completedAt: new Date() } });
+  }
+  return db.audit.update({ where: { id: auditId }, data: { cancelRequested: true } });
+});
+
+app.delete('/api/v1/audits/:auditId', async (req, reply) => {
+  const { auditId } = auditIdParams.parse(req.params);
+  const audit = await db.audit.findUnique({ where: { id: auditId } });
+  if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
+  if (['queued','running'].includes(audit.status)) return reply.code(409).send({ error: 'cannot_delete_active_audit' });
+  await db.audit.delete({ where: { id: auditId } }); return reply.code(204).send();
+});
+
+async function runPlatformMaintenance() {
+  const now = new Date();
+  const due = await db.auditSchedule.findMany({ where: { enabled: true, nextRunAt: { lte: now } }, include: { project: true } });
+  for (const schedule of due) {
+    await enqueueAudit(schedule.projectId, 'scheduled');
+    await db.auditSchedule.update({ where: { id: schedule.id }, data: { lastRunAt: now, nextRunAt: nextScheduleRun(schedule.frequency, schedule.hourUtc, schedule.dayOfWeek, schedule.dayOfMonth, now) } });
+  }
+  const staleCutoff = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+  await db.audit.updateMany({ where: { status: 'running', startedAt: { lt: staleCutoff } }, data: { status: 'failed', completedAt: now } });
+  const projects = await db.project.findMany({ select: { id: true, retentionDays: true } });
+  for (const project of projects) {
+    const cutoff = new Date(now.getTime() - project.retentionDays * 86400000);
+    await db.audit.deleteMany({ where: { projectId: project.id, createdAt: { lt: cutoff }, status: { notIn: ['queued','running'] } } });
+  }
+}
+
+setInterval(() => runPlatformMaintenance().catch((error) => app.log.error(error)), 60_000).unref();
+runPlatformMaintenance().catch((error) => app.log.error(error));
 
 await app.listen({ port: Number(process.env.API_PORT ?? 4000), host: '0.0.0.0' });

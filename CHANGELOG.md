@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0] - Audit Platform
+
+### Added
+- Audit-to-audit comparison with stable finding lifecycle detection.
+- Project dashboard with recent audit history, score and regression summaries.
+- Automated daily, weekly and monthly audit schedules with duplicate-run protection.
+- Regression classification for new, resolved and persistent findings.
+- Audit cancellation, audit/project deletion APIs and configurable retention cleanup.
+- Platform-oriented database indexes and persisted schedule configuration.
+
+### Changed
+- Project navigation now exposes a Platform view for continuous monitoring workflows.
+
 ## [Unreleased]
 
 ## [0.3.0] - 2026-10-07

@@ -9,9 +9,12 @@ type Summary = { total: number; bySeverity: Record<string, number>; byCategory: 
 type PageRow = { id: string; url: string; finalUrl: string; statusCode: number; title: string | null; crawlDepth: number | null; responseTimeMs: number; _count: { issues: number } };
 type Issue = { id: string; ruleId: string; severity: string; category: string; message: string; evidence: unknown; page: { url: string; finalUrl: string; statusCode: number } | null };
 type CrawlFailure = { id: string; url: string; type: string; message: string; statusCode: number | null; attempts: number; createdAt: string };
-type View = 'overview' | 'history' | 'issues' | 'pages' | 'failures';
+type View = 'platform' | 'overview' | 'history' | 'issues' | 'pages' | 'failures';
 type ComparedIssue = { fingerprint: string; ruleId: string; severity: string; category: string; message: string; page?: { url: string; finalUrl: string } | null };
-type AuditComparison = { currentAuditId: string; baselineAuditId: string; score: { current: number | null; baseline: number | null; delta: number | null }; pages: { current: number; baseline: number; delta: number; added: string[]; removed: string[] }; issues: { current: number; baseline: number; delta: number; new: ComparedIssue[]; resolved: ComparedIssue[]; persistent: ComparedIssue[] } };
+type AuditComparison = { currentAuditId: string; baselineAuditId: string; score: { current: number | null; baseline: number | null; delta: number | null }; pages: { current: number; baseline: number; delta: number; added: string[]; removed: string[] }; issues: { current: number; baseline: number; delta: number; new: ComparedIssue[]; resolved: ComparedIssue[]; persistent: ComparedIssue[]; regressed: ComparedIssue[]; improved: ComparedIssue[] } };
+
+
+type PlatformData = { project: Project & { retentionDays: number }; schedule: { enabled: boolean; frequency: string; hourUtc: number; dayOfWeek: number | null; dayOfMonth: number | null; nextRunAt: string | null; lastRunAt: string | null } | null; audits: Audit[]; latest: Audit | null; previous: Audit | null; regression: AuditComparison | null };
 
 type RuleGuide = { title: string; why: string; fix: string };
 
@@ -81,11 +84,21 @@ export default function Home() {
   const [baselineAudit, setBaselineAudit] = useState('');
   const [comparison, setComparison] = useState<AuditComparison | null>(null);
   const [comparisonBusy, setComparisonBusy] = useState(false);
+  const [platform, setPlatform] = useState<PlatformData | null>(null);
+  const [scheduleFrequency, setScheduleFrequency] = useState('weekly');
+  const [scheduleHour, setScheduleHour] = useState(3);
+  const [retentionDays, setRetentionDays] = useState(90);
 
   const loadProjects = useCallback(async () => {
     const data = await json<Project[]>(`${api}/projects`);
     setProjects(data);
     setSelectedProject((current) => current || data[0]?.id || '');
+  }, []);
+
+  const loadPlatform = useCallback(async (projectId: string) => {
+    if (!projectId) { setPlatform(null); return; }
+    const data = await json<PlatformData>(`${api}/projects/${projectId}/platform`);
+    setPlatform(data); setScheduleFrequency(data.schedule?.frequency ?? 'weekly'); setScheduleHour(data.schedule?.hourUtc ?? 3); setRetentionDays(data.project.retentionDays ?? 90);
   }, []);
 
   const loadAudits = useCallback(async (projectId: string) => {
@@ -126,7 +139,7 @@ export default function Home() {
   }, [selectedAudit]);
 
   useEffect(() => { loadProjects().catch((e: Error) => setError(e.message)); }, [loadProjects]);
-  useEffect(() => { loadAudits(selectedProject).catch((e: Error) => setError(e.message)); }, [selectedProject, loadAudits]);
+  useEffect(() => { loadAudits(selectedProject).catch((e: Error) => setError(e.message)); loadPlatform(selectedProject).catch((e: Error) => setError(e.message)); }, [selectedProject, loadAudits, loadPlatform]);
   useEffect(() => { setView('overview'); setSelectedRule(null); setRuleIssues([]); setComparison(null); loadAudit(selectedAudit).catch((e: Error) => setError(e.message)); }, [selectedAudit, loadAudit]);
   useEffect(() => { const index = audits.findIndex((item) => item.id === selectedAudit); const fallback = audits.slice(index + 1).find((item) => item.status === 'completed')?.id ?? ''; setBaselineAudit((current) => current && current !== selectedAudit && audits.some((item) => item.id === current && item.status === 'completed') ? current : fallback); }, [audits, selectedAudit]);
   useEffect(() => { if (view !== 'history') return; loadComparison(selectedAudit, baselineAudit).catch((e: Error) => setError(e.message)); }, [view, selectedAudit, baselineAudit, loadComparison]);
@@ -143,6 +156,18 @@ export default function Home() {
       await loadProjects(); setSelectedProject(project.id); setName(''); setBaseUrl('https://');
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to create project'); } finally { setBusy(false); }
   }
+
+  async function saveSchedule(enabled: boolean) {
+    if (!selectedProject) return; setBusy(true);
+    try { await json(`${api}/projects/${selectedProject}/schedule`, { method: 'PUT', body: JSON.stringify({ enabled, frequency: scheduleFrequency, hourUtc: scheduleHour }) }); await loadPlatform(selectedProject); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to save schedule'); } finally { setBusy(false); }
+  }
+
+  async function saveRetention() {
+    if (!selectedProject) return; setBusy(true);
+    try { await json(`${api}/projects/${selectedProject}`, { method: 'PATCH', body: JSON.stringify({ retentionDays }) }); await loadPlatform(selectedProject); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to save retention'); } finally { setBusy(false); }
+  }
+
+  async function cancelAudit() { if (!selectedAudit) return; setBusy(true); try { await json(`${api}/audits/${selectedAudit}/cancel`, { method: 'POST', body: '{}' }); await loadAudit(selectedAudit); } catch(e) { setError(e instanceof Error ? e.message : 'Unable to cancel audit'); } finally { setBusy(false); } }
 
   async function startAudit() {
     if (!selectedProject) return; setBusy(true); setError('');
@@ -175,10 +200,17 @@ export default function Home() {
         <form onSubmit={createProject} className="create-form"><h3>New project</h3><input required placeholder="Project name" value={name} onChange={(e) => setName(e.target.value)} /><input required type="url" placeholder="https://example.com" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} /><button className="primary" disabled={busy}>Create project</button></form>
       </aside>
       <div className="content">
-        <section className="panel hero-panel"><div><span className="eyebrow">SELECTED PROJECT</span><h2>{project?.name ?? 'Create a project to begin'}</h2><p>{project?.baseUrl ?? 'Add a site and launch its first technical SEO audit.'}</p></div><button className="primary start" disabled={!selectedProject || busy} onClick={startAudit}>{busy ? 'Working…' : 'Start new audit'}</button></section>
+        <section className="panel hero-panel"><div><span className="eyebrow">SELECTED PROJECT</span><h2>{project?.name ?? 'Create a project to begin'}</h2><p>{project?.baseUrl ?? 'Add a site and launch its first technical SEO audit.'}</p></div><div className="hero-actions"><button className="text-button" disabled={!selectedProject} onClick={() => setView('platform')}>Project dashboard</button><button className="primary start" disabled={!selectedProject || busy} onClick={startAudit}>{busy ? 'Working…' : 'Start new audit'}</button></div></section>
         {audits.length > 0 && <section className="audit-strip"><label>Audit<select value={selectedAudit} onChange={(e) => setSelectedAudit(e.target.value)}>{audits.map((item) => { const status = item.id === selectedAudit && audit ? audit.status : item.status; return <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString()} · {status}</option>; })}</select></label><span className={`status ${audit?.status ?? ''}`}>{audit?.status ?? '—'}</span></section>}
         {audit ? <>
-          <nav className="view-tabs" aria-label="Audit results">{(['overview','history','issues','pages','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
+          <nav className="view-tabs" aria-label="Audit results">{(['platform','overview','history','issues','pages','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
+          {view === 'platform' && platform && <section className="comparison-stack">
+            <section className="metrics"><article><span>Latest score</span><strong>{platform.latest?.score ?? '—'}</strong></article><article><span>Previous score</span><strong>{platform.previous?.score ?? '—'}</strong></article><article><span>Completed audits</span><strong>{platform.audits.length}</strong></article><article><span>Regression changes</span><strong>{platform.regression ? platform.regression.issues.new.length : 0}</strong><small>new findings</small></article></section>
+            {platform.regression && <ComparisonView comparison={platform.regression} />}
+            <section className="panel"><div className="section-title"><div><span className="eyebrow">SCHEDULING</span><h2>Automated audits</h2><p>Run this project automatically without overlapping an active crawl.</p></div><span>{platform.schedule?.enabled ? `Next ${platform.schedule.nextRunAt ? new Date(platform.schedule.nextRunAt).toLocaleString() : 'pending'}` : 'Disabled'}</span></div><div className="filters"><select value={scheduleFrequency} onChange={(e) => setScheduleFrequency(e.target.value)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select><input type="number" min="0" max="23" value={scheduleHour} onChange={(e) => setScheduleHour(Number(e.target.value))} /><button className="primary" onClick={() => saveSchedule(true)}>Enable / update</button><button onClick={() => saveSchedule(false)}>Disable</button></div></section>
+            <section className="panel"><div className="section-title"><div><span className="eyebrow">RETENTION</span><h2>Audit retention</h2><p>Completed audit data older than this is removed by platform maintenance.</p></div></div><div className="filters"><input type="number" min="7" max="3650" value={retentionDays} onChange={(e) => setRetentionDays(Number(e.target.value))} /><button className="primary" onClick={saveRetention}>Save retention</button>{audit && activeStatuses.has(audit.status) && <button onClick={cancelAudit}>Cancel active audit</button>}</div></section>
+            <section className="panel"><div className="section-title"><div><span className="eyebrow">TREND</span><h2>Recent audit history</h2></div></div><div className="table-wrap"><table><thead><tr><th>Audit</th><th>Score</th><th>Pages</th><th>Issues</th><th>Failures</th></tr></thead><tbody>{platform.audits.map((item) => <tr key={item.id}><td>{new Date(item.createdAt).toLocaleString()}</td><td>{item.score ?? '—'}</td><td>{item._count?.pages ?? 0}</td><td>{item._count?.issues ?? 0}</td><td>{item._count?.crawlFailures ?? 0}</td></tr>)}</tbody></table></div></section>
+          </section>}
           {view === 'overview' && <>
             <section className="metrics"><article><span>SEO score</span><strong className={scoreClass}>{audit.score ?? '—'}</strong></article><article><span>Pages crawled</span><strong>{audit._count?.pages ?? pages.length}</strong></article><article><span>Actionable findings</span><strong>{actionable}</strong><small>{summary?.bySeverity.info ?? 0} informational</small></article><article><span>Status</span><strong className="metric-status">{audit.status}</strong></article></section>
             <section className="panel"><div className="section-title"><div><span className="eyebrow">SEVERITY</span><h2>Finding overview</h2></div><span>{summary?.total ?? 0} total findings</span></div><div className="severity-grid">{severities.map((severity) => <button key={severity} className={`severity-card ${severity}`} onClick={() => goToIssues(severity)}><span>{severity}</span><strong>{summary?.bySeverity[severity] ?? 0}</strong></button>)}</div></section>
@@ -214,6 +246,8 @@ function ComparisonView({ comparison }: { comparison: AuditComparison }) {
   const sections: Array<{ title: string; tone: string; items: ComparedIssue[] }> = [
     { title: 'New findings', tone: 'new', items: comparison.issues.new },
     { title: 'Resolved findings', tone: 'resolved', items: comparison.issues.resolved },
+    { title: 'Regressed findings', tone: 'new', items: comparison.issues.regressed ?? [] },
+    { title: 'Improved findings', tone: 'resolved', items: comparison.issues.improved ?? [] },
     { title: 'Persistent findings', tone: 'persistent', items: comparison.issues.persistent },
   ];
   return <>

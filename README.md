@@ -244,3 +244,8 @@ See `SECURITY.md` for the project's security reporting policy.
 SEO Auditor is licensed under the Apache License 2.0.
 
 See `LICENSE` for details.
+
+
+## v0.4 Audit Platform
+
+The v0.4 development line adds continuous audit-platform capabilities on top of the v0.3 crawler and rule engine: audit comparison and finding lifecycle detection, project trends, automated daily/weekly/monthly schedules, regression classification, cancellation, retention and stale-run recovery. The API remains the source of truth so these workflows can later be reused by CLI, CI and integrations.

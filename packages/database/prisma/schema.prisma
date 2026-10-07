@@ -11,9 +11,11 @@ model Project {
   id        String   @id @default(cuid())
   name      String
   baseUrl   String
-  createdAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  retentionDays Int      @default(90)
 
-  audits Audit[]
+  audits   Audit[]
+  schedule AuditSchedule?
 }
 
 model Audit {
@@ -24,6 +26,8 @@ model Audit {
   startedAt   DateTime?
   completedAt DateTime?
   createdAt   DateTime  @default(now())
+  trigger     String    @default("manual")
+  cancelRequested Boolean @default(false)
 
   project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   pages         Page[]
@@ -31,6 +35,7 @@ model Audit {
   crawlFailures CrawlFailure[]
 
   @@index([projectId])
+  @@index([projectId, createdAt])
   @@index([status])
   @@index([createdAt])
 }
@@ -106,4 +111,22 @@ model CrawlFailure {
   @@index([auditId])
   @@index([auditId, type])
   @@index([statusCode])
+}
+
+model AuditSchedule {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  enabled   Boolean  @default(false)
+  frequency String   @default("weekly")
+  hourUtc   Int      @default(3)
+  dayOfWeek Int?
+  dayOfMonth Int?
+  nextRunAt DateTime?
+  lastRunAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([enabled, nextRunAt])
 }

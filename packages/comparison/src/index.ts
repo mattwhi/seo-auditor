@@ -35,6 +35,8 @@ export interface AuditComparison {
     new: ComparedIssue[];
     resolved: ComparedIssue[];
     persistent: ComparedIssue[];
+    regressed: ComparedIssue[];
+    improved: ComparedIssue[];
   };
 }
 
@@ -76,6 +78,9 @@ export function compareAudits(current: AuditSnapshot, baseline: AuditSnapshot): 
   const newIssues = [...currentIssues].filter(([key]) => !baselineIssues.has(key)).map(([, issue]) => issue);
   const resolved = [...baselineIssues].filter(([key]) => !currentIssues.has(key)).map(([, issue]) => issue);
   const persistent = [...currentIssues].filter(([key]) => baselineIssues.has(key)).map(([, issue]) => issue);
+  const rank: Record<string, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
+  const regressed = persistent.filter((issue) => (rank[issue.severity] ?? 0) > (rank[baselineIssues.get(issue.fingerprint)?.severity ?? ''] ?? 0));
+  const improved = persistent.filter((issue) => (rank[issue.severity] ?? 0) < (rank[baselineIssues.get(issue.fingerprint)?.severity ?? ''] ?? 0));
 
   return {
     currentAuditId: current.id,
@@ -99,6 +104,8 @@ export function compareAudits(current: AuditSnapshot, baseline: AuditSnapshot): 
       new: newIssues,
       resolved,
       persistent,
+      regressed,
+      improved,
     },
   };
 }

@@ -60,6 +60,8 @@ new Worker<CrawlJob>(
         },
 
         onPage: async (pageFacts) => {
+          const state = await db.audit.findUnique({ where: { id: job.data.auditId }, select: { cancelRequested: true } });
+          if (state?.cancelRequested) throw new Error('AUDIT_CANCELLED');
           const pageFindings = evaluatePage(pageFacts);
 
           await db.$transaction(async (tx) => {
@@ -124,17 +126,18 @@ new Worker<CrawlJob>(
         },
       });
     } catch (error) {
+      const cancelled = error instanceof Error && error.message === 'AUDIT_CANCELLED';
       await db.audit.update({
         where: {
           id: job.data.auditId,
         },
         data: {
-          status: 'failed',
+          status: cancelled ? 'cancelled' : 'failed',
           completedAt: new Date(),
         },
       });
 
-      throw error;
+      if (!cancelled) throw error;
     }
   },
   {
