@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### v0.3 development — Slice 5A
+
+- Restructured audit results into Overview, Issues, Pages, and Crawl Failures views.
+- Aggregated findings by rule so informational findings no longer dominate the main results view.
+- Added crawl-failure API exposure and dashboard reporting.
+- Added human-readable issue labels and severity-first prioritisation.
+
 ### Added
 
 - v0.3 Slice 4 browser workflow for creating projects, launching audits, polling active audits and reviewing crawl results.

@@ -30,7 +30,7 @@ app.get('/api/v1/projects/:projectId/audits', async (req, reply) => {
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   return db.audit.findMany({
     where: { projectId: p.projectId },
-    include: { _count: { select: { pages: true, issues: true } } },
+    include: { _count: { select: { pages: true, issues: true, crawlFailures: true } } },
     orderBy: { createdAt: 'desc' },
     take: 25,
   });
@@ -79,7 +79,7 @@ app.get('/api/v1/audits/:auditId', async (req, reply) => {
   const p = auditIdParams.parse(req.params);
   const a = await db.audit.findUnique({
     where: { id: p.auditId },
-    include: { _count: { select: { pages: true, issues: true } } },
+    include: { _count: { select: { pages: true, issues: true, crawlFailures: true } } },
   });
   return a ?? reply.code(404).send({ error: 'audit_not_found' });
 });
@@ -208,6 +208,31 @@ app.get('/api/v1/audits/:auditId/pages', async (req, reply) => {
       skip: query.offset,
     }),
     db.page.count({ where }),
+  ]);
+
+  return { items, total, limit: query.limit, offset: query.offset };
+});
+
+app.get('/api/v1/audits/:auditId/failures', async (req, reply) => {
+  const params = auditIdParams.parse(req.params);
+  const query = z
+    .object({
+      limit: z.coerce.number().int().min(1).max(500).default(100),
+      offset: z.coerce.number().int().min(0).default(0),
+    })
+    .parse(req.query);
+  const audit = await db.audit.findUnique({ where: { id: params.auditId }, select: { id: true } });
+  if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
+
+  const where = { auditId: params.auditId };
+  const [items, total] = await db.$transaction([
+    db.crawlFailure.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: query.limit,
+      skip: query.offset,
+    }),
+    db.crawlFailure.count({ where }),
   ]);
 
   return { items, total, limit: query.limit, offset: query.offset };
