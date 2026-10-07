@@ -25,9 +25,10 @@ model Audit {
   completedAt DateTime?
   createdAt   DateTime  @default(now())
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  pages   Page[]
-  issues  Issue[]
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pages         Page[]
+  issues        Issue[]
+  crawlFailures CrawlFailure[]
 
   @@index([projectId])
   @@index([status])
@@ -49,6 +50,18 @@ model Page {
   h2              String[]
   wordCount       Int
   schemaTypes     String[]
+  redirectChain   Json?
+  contentType     String?
+  contentLength   Int?
+  contentEncoding String?
+  contentLanguage String?
+  cacheControl    String?
+  etag            String?
+  lastModified    String?
+  xRobotsTag      String[]
+  crawlDepth      Int?
+  redirectCount   Int?
+  fetchAttempts   Int?
 
   audit  Audit   @relation(fields: [auditId], references: [id], onDelete: Cascade)
   issues Issue[]
@@ -75,4 +88,22 @@ model Issue {
   @@index([pageId])
   @@index([auditId, ruleId])
   @@index([severity])
+}
+
+model CrawlFailure {
+  id         String   @id @default(cuid())
+  auditId    String
+  url        String
+  type       String
+  message    String
+  statusCode Int?
+  attempts   Int
+  redirectChain Json?
+  createdAt  DateTime @default(now())
+
+  audit Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([auditId, type])
+  @@index([statusCode])
 }

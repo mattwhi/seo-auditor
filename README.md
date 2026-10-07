@@ -4,7 +4,7 @@ SEO Auditor is an open-source, self-hosted technical SEO crawling, auditing and 
 
 The project is being built as a scalable alternative for developers, SEO professionals and site owners who want transparent, programmable SEO auditing without being locked into a proprietary platform.
 
-> **Project status:** Pre-alpha — v0.1 foundation
+> **Project status:** Pre-alpha — v0.2 crawler
 
 SEO Auditor is under active development and is not yet intended for production SEO auditing.
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0] - 2026-10-07
+
+- Added conservative URL normalization and same-origin crawl controls
+- Added robots.txt parsing and enforcement with Allow/Disallow precedence
+- Added sitemap and sitemap-index discovery
+- Added bounded crawl depth, URL budgets and queue controls
+- Added page-level concurrency and configurable request-rate limiting
+- Added bounded retries, Retry-After handling and persisted crawl failures
+- Added manual redirect handling, redirect-chain evidence and loop protection
+- Added persisted SEO-relevant HTTP response metadata and crawl evidence
+- Expanded crawler coverage to 55 automated tests
+
 ## [0.1.0] - 2026-10-07
 
 - Industrialized monorepo foundation

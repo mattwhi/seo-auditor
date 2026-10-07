@@ -47,6 +47,22 @@ export interface PageFacts {
   images: PageImage[];
   links: PageLink[];
   schemaTypes: string[];
+  contentLength?: number | null;
+  contentEncoding?: string | null;
+  contentLanguage?: string | null;
+  cacheControl?: string | null;
+  etag?: string | null;
+  lastModified?: string | null;
+  xRobotsTag?: string[];
+  crawlDepth?: number;
+  redirectCount?: number;
+  fetchAttempts?: number;
+  redirectHops?: Array<{
+    url: string;
+    statusCode: number;
+    location: string;
+    targetUrl: string;
+  }>;
 }
 
 export interface RuleFinding {
@@ -71,4 +87,20 @@ export interface CrawlJob {
   projectId: string;
   startUrl: string;
   maxUrls: number;
+}
+
+export type CrawlFailureType = 'timeout' | 'network' | 'http' | 'redirect';
+
+export interface CrawlFailure {
+  url: string;
+  type: CrawlFailureType;
+  message: string;
+  statusCode?: number;
+  attempts: number;
+  redirectHops?: Array<{
+    url: string;
+    statusCode: number;
+    location: string;
+    targetUrl: string;
+  }>;
 }

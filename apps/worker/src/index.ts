@@ -28,8 +28,28 @@ new Worker<CrawlJob>(
     try {
       await crawlSite(job.data.startUrl, {
         maxUrls: job.data.maxUrls,
+        concurrency: config.CRAWLER_PAGE_CONCURRENCY,
+        minDelayMs: config.CRAWLER_MIN_DELAY_MS,
+        maxRetries: config.CRAWLER_MAX_RETRIES,
+        retryBaseDelayMs: config.CRAWLER_RETRY_BASE_DELAY_MS,
+        retryMaxDelayMs: config.CRAWLER_RETRY_MAX_DELAY_MS,
+        maxRedirects: config.CRAWLER_MAX_REDIRECTS,
         userAgent: config.CRAWLER_USER_AGENT,
         timeoutMs: config.CRAWLER_REQUEST_TIMEOUT_MS,
+
+        onFailure: async (failure) => {
+          await db.crawlFailure.create({
+            data: {
+              auditId: job.data.auditId,
+              url: failure.url,
+              type: failure.type,
+              message: failure.message,
+              statusCode: failure.statusCode,
+              attempts: failure.attempts,
+              redirectChain: failure.redirectHops ?? undefined,
+            },
+          });
+        },
 
         onPage: async (pageFacts) => {
           const page = await db.page.create({
@@ -47,6 +67,18 @@ new Worker<CrawlJob>(
               h2: pageFacts.h2,
               wordCount: pageFacts.wordCount,
               schemaTypes: pageFacts.schemaTypes,
+              redirectChain: pageFacts.redirectHops ?? undefined,
+              contentType: pageFacts.contentType,
+              contentLength: pageFacts.contentLength,
+              contentEncoding: pageFacts.contentEncoding,
+              contentLanguage: pageFacts.contentLanguage,
+              cacheControl: pageFacts.cacheControl,
+              etag: pageFacts.etag,
+              lastModified: pageFacts.lastModified,
+              xRobotsTag: pageFacts.xRobotsTag ?? [],
+              crawlDepth: pageFacts.crawlDepth,
+              redirectCount: pageFacts.redirectCount,
+              fetchAttempts: pageFacts.fetchAttempts,
             },
           });
 
