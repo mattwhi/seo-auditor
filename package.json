@@ -8,7 +8,7 @@
     "dev": "pnpm dev:prepare && pnpm --parallel --filter './apps/*' dev",
     "build": "pnpm --filter './packages/*' build && pnpm --filter './apps/*' build",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm --filter './packages/*' build && pnpm -r typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
