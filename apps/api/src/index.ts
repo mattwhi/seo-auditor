@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '@seo-auditor/database';
 import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
+import { compareAudits } from '@seo-auditor/comparison';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
@@ -82,6 +83,49 @@ app.get('/api/v1/audits/:auditId', async (req, reply) => {
     include: { _count: { select: { pages: true, issues: true, crawlFailures: true } } },
   });
   return a ?? reply.code(404).send({ error: 'audit_not_found' });
+});
+
+app.get('/api/v1/audits/:auditId/compare/:baselineAuditId', async (req, reply) => {
+  const params = z
+    .object({ auditId: z.string().min(1), baselineAuditId: z.string().min(1) })
+    .parse(req.params);
+
+  if (params.auditId === params.baselineAuditId) {
+    return reply.code(400).send({ error: 'audits_must_be_different' });
+  }
+
+  const audits = await db.audit.findMany({
+    where: { id: { in: [params.auditId, params.baselineAuditId] } },
+    select: {
+      id: true,
+      projectId: true,
+      status: true,
+      score: true,
+      pages: { select: { url: true, finalUrl: true } },
+      issues: {
+        select: {
+          ruleId: true,
+          severity: true,
+          category: true,
+          message: true,
+          evidence: true,
+          page: { select: { url: true, finalUrl: true } },
+        },
+      },
+    },
+  });
+
+  const current = audits.find((item) => item.id === params.auditId);
+  const baseline = audits.find((item) => item.id === params.baselineAuditId);
+  if (!current || !baseline) return reply.code(404).send({ error: 'audit_not_found' });
+  if (current.projectId !== baseline.projectId) {
+    return reply.code(400).send({ error: 'audits_must_belong_to_same_project' });
+  }
+  if (current.status !== 'completed' || baseline.status !== 'completed') {
+    return reply.code(409).send({ error: 'audits_must_be_completed' });
+  }
+
+  return compareAudits(current, baseline);
 });
 
 app.get('/api/v1/audits/:auditId/issues', async (req, reply) => {
