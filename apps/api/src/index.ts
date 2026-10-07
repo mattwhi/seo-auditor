@@ -24,6 +24,17 @@ app.post('/api/v1/projects', async (req, reply) => {
   return reply.code(201).send(await db.project.create({ data: x.data }));
 });
 app.get('/api/v1/projects', async () => db.project.findMany({ orderBy: { createdAt: 'desc' } }));
+app.get('/api/v1/projects/:projectId/audits', async (req, reply) => {
+  const p = z.object({ projectId: z.string().min(1) }).parse(req.params);
+  const project = await db.project.findUnique({ where: { id: p.projectId }, select: { id: true } });
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  return db.audit.findMany({
+    where: { projectId: p.projectId },
+    include: { _count: { select: { pages: true, issues: true } } },
+    orderBy: { createdAt: 'desc' },
+    take: 25,
+  });
+});
 app.post('/api/v1/projects/:projectId/audits', async (req, reply) => {
   const p = z.object({ projectId: z.string() }).parse(req.params);
   const project = await db.project.findUnique({ where: { id: p.projectId } });

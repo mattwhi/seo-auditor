@@ -76,6 +76,8 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      API_INTERNAL_URL: http://api:4000
     command: ['pnpm', '--filter', '@seo-auditor/web', 'start']
     ports:
       - '3000:3000'

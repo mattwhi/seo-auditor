@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- v0.3 Slice 4 browser workflow for creating projects, launching audits, polling active audits and reviewing crawl results.
+- Audit dashboard with score, page/finding counts, severity breakdown, rule summaries, page results and deterministic finding evidence.
+- Same-origin Next.js API proxy for browser-safe access to the internal API service.
+- Project audit history API used by the dashboard.
+
 ### v0.3 SEO Rule Engine
 
 - Added core technical SEO rules for HTTP status, redirects, metadata, headings, indexability and canonical evidence
