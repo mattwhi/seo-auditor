@@ -101,3 +101,18 @@
 - Stable SEO rule contracts
 - PostgreSQL and Redis infrastructure
 - Initial rules and tests
+
+## [0.5.0-dev.0] - 2026-10-07
+
+### Added
+- Advanced audit-wide technical SEO analysis for duplicate titles, duplicate meta descriptions and exact duplicate body content.
+- Internal-link graph evidence with broken internal links, HTTP internal links, incoming-link/orphan candidates and crawl-depth findings.
+- Canonical cluster analysis across crawled pages.
+- Hreflang extraction, invalid-reference detection and reciprocal-reference checks for crawled targets.
+- JSON-LD parse-error evidence and invalid structured-data findings.
+- Persisted outgoing-link, image, hreflang, JSON-LD and content-hash evidence for future platform analysis.
+- First-class remediation metadata contract covering support, risk, mode, platform and restricted future action identifiers.
+- Remediation capability metadata for selected existing and advanced rules in preparation for the v0.7/v0.8 connector/remediation architecture.
+
+### Architecture
+- Crawling and analysis remain read-only. Remediation metadata describes future capabilities only; v0.5 does not perform external writes or WordPress changes.

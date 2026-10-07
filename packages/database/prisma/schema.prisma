@@ -55,6 +55,12 @@ model Page {
   h2              String[]
   wordCount       Int
   schemaTypes     String[]
+  images          Json?
+  outgoingLinks   Json?
+  hreflang        Json?
+  jsonLdBlocks    Int     @default(0)
+  jsonLdErrors    Int     @default(0)
+  contentHash     String?
   redirectChain   Json?
   contentType     String?
   contentLength   Int?
@@ -74,6 +80,8 @@ model Page {
   @@unique([auditId, url])
   @@index([auditId])
   @@index([statusCode])
+  @@index([auditId, crawlDepth])
+  @@index([auditId, contentHash])
 }
 
 model Issue {

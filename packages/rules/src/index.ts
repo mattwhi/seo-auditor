@@ -115,6 +115,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'Page has no title element.',
     severity: 'high',
     category: 'metadata',
+    remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_title' },
     evaluate(page) {
       return !isIndexableHtmlCandidate(page) || page.title ? [] : [finding(this)];
     },
@@ -125,6 +126,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'Page title contains fewer than 30 characters.',
     severity: 'low',
     category: 'metadata',
+    remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_title' },
     evaluate(page) {
       if (!isIndexableHtmlCandidate(page) || !page.title || page.title.length >= 30) return [];
       return [finding(this, { evidence: { length: page.title.length, title: page.title } })];
@@ -136,6 +138,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'Page title contains more than 60 characters.',
     severity: 'low',
     category: 'metadata',
+    remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_title' },
     evaluate(page) {
       if (!isIndexableHtmlCandidate(page) || !page.title || page.title.length <= 60) return [];
       return [finding(this, { evidence: { length: page.title.length, title: page.title } })];
@@ -147,6 +150,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'Page has no meta description.',
     severity: 'medium',
     category: 'metadata',
+    remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_description' },
     evaluate(page) {
       return !isIndexableHtmlCandidate(page) || page.metaDescription ? [] : [finding(this)];
     },
@@ -157,6 +161,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'Meta description contains fewer than 70 characters.',
     severity: 'low',
     category: 'metadata',
+    remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_description' },
     evaluate(page) {
       if (
         !isIndexableHtmlCandidate(page) ||
@@ -177,6 +182,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'Meta description contains more than 160 characters.',
     severity: 'low',
     category: 'metadata',
+    remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_description' },
     evaluate(page) {
       if (
         !isIndexableHtmlCandidate(page) ||
@@ -259,6 +265,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'Page has no canonical link.',
     severity: 'medium',
     category: 'indexability',
+    remediation: { supported: true, risk: 'medium', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_canonical' },
     evaluate(page) {
       return !isIndexableHtmlCandidate(page) || page.canonical ? [] : [finding(this)];
     },
@@ -269,6 +276,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'Page canonical cannot be resolved to a valid HTTP or HTTPS URL.',
     severity: 'high',
     category: 'indexability',
+    remediation: { supported: true, risk: 'medium', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_canonical' },
     evaluate(page) {
       if (!isHtmlSuccess(page) || !page.canonical) return [];
       return resolveCanonical(page.canonical, page.finalUrl)
@@ -307,6 +315,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     description: 'One or more images are missing alt text.',
     severity: 'medium',
     category: 'images',
+    remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce'], action: 'seo:update_alt' },
     evaluate(page) {
       const count = page.images.filter((image) => !image.alt).length;
       return count ? [finding(this, { evidence: { count } })] : [];
@@ -324,3 +333,6 @@ export function evaluatePage(page: PageFacts, rules: readonly SeoRule[] = coreRu
 
   return new RuleEngine(new RuleRegistry(rules)).evaluatePage(page);
 }
+
+export { evaluateAudit, advancedRemediation } from './audit.js';
+export type { AuditPageFacts, AuditRuleFinding } from './audit.js';

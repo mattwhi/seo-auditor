@@ -215,9 +215,29 @@ Expanded deterministic technical and on-page SEO auditing.
 
 Audit history, page exploration, filtering, issue drill-down and reporting.
 
-### v0.5+
+### v0.5 — Advanced Technical SEO
 
-Performance auditing, integrations, optional platform-specific rule packs, CLI/CI tooling and additional monitoring capabilities.
+Internal-link graph analysis, crawl-depth/orphan signals, duplicate metadata/content, canonical clusters, hreflang, structured-data validation and remediation-capable rule metadata.
+
+### v0.6 — Performance
+
+Performance and page-experience auditing.
+
+### v0.7 — Integrations
+
+Search Console, analytics and the restricted WordPress connection framework.
+
+### v0.8 — Platform-specific packs
+
+WordPress, WooCommerce and SEO-plugin rule/remediation packs, with preview, approval, verification and rollback architecture. Shopify can later use the same connector abstraction.
+
+### v0.9 — CLI / API / CI
+
+Automation-oriented CLI, API and CI workflows.
+
+### v1.0 — Public release
+
+Stable public release after the pre-release milestones are validated.
 
 ## Documentation
 
@@ -249,3 +269,8 @@ See `LICENSE` for details.
 ## v0.4 Audit Platform
 
 The v0.4 release candidate adds continuous audit-platform capabilities on top of the v0.3 crawler and rule engine: audit comparison and finding lifecycle detection, project trends, automated daily/weekly/monthly schedules, regression classification, cancellation, retention and stale-run recovery. The API remains the source of truth so these workflows can later be reused by CLI, CI and integrations.
+
+
+## v0.5 Advanced Technical SEO (development)
+
+The v0.5 development line expands audit-wide deterministic analysis while keeping crawling and remediation separated. Rules can now describe future remediation support, risk, approval mode, supported platforms and a restricted action identifier. This metadata does not grant write access: external modification remains deferred to the v0.7 connection framework and v0.8 platform packs. The long-term workflow is Crawl → Understand → Recommend → Fix → Verify → Monitor.

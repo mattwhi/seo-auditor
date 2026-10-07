@@ -44,6 +44,17 @@ const ruleGuides: Record<string, RuleGuide> = {
   'indexability.canonical-invalid': { title: 'Canonical URL is invalid', why: 'An invalid canonical cannot reliably communicate the preferred URL.', fix: 'Correct the canonical href so it resolves to a valid HTTP or HTTPS URL.' },
   'indexability.canonical-non-self': { title: 'Canonical points to another URL', why: 'A non-self canonical may be intentional duplicate consolidation, but an unexpected canonical can cause the current URL to be treated as non-preferred.', fix: 'Confirm the destination is intentionally the preferred version. If this page should be canonical, change it to the correct preferred URL.' },
   'image.alt-missing': { title: 'Image alt text missing', why: 'Alternative text helps accessibility and gives search engines context for meaningful images.', fix: 'Add concise alt text to informative images. Decorative images should normally use an empty alt attribute instead.' },
+  'metadata.title-duplicate': { title: 'Duplicate page title', why: 'Duplicate titles make it harder to distinguish pages and their search intent.', fix: 'Give important indexable pages unique, descriptive titles.' },
+  'metadata.description-duplicate': { title: 'Duplicate meta description', why: 'Repeated descriptions reduce page-specific context available for search snippets.', fix: 'Write unique descriptions for important indexable pages where useful.' },
+  'content.duplicate': { title: 'Duplicate page content', why: 'Identical body content can create competing URLs and unclear canonical signals.', fix: 'Consolidate true duplicates, improve unique value, or intentionally canonicalise alternate versions.' },
+  'links.broken-internal': { title: 'Broken internal link', why: 'Internal links to error responses waste crawl effort and create dead ends for users.', fix: 'Update the source link to a relevant live destination or restore the target page.' },
+  'links.http-internal': { title: 'Internal HTTP link', why: 'HTTP links can introduce unnecessary redirects and inconsistent secure URL signals.', fix: 'Update the internal link to its HTTPS destination.' },
+  'links.orphan': { title: 'Page has no incoming internal links', why: 'Pages without incoming internal links can be difficult for users and crawlers to discover through site navigation.', fix: 'Add relevant internal links where the page belongs in the site architecture, or confirm that isolation is intentional.' },
+  'links.deep-page': { title: 'Deep page', why: 'Important pages several levels from the entry point can receive less internal prominence and take more crawl steps to reach.', fix: 'Review the internal-link structure and surface important pages closer to relevant hubs where appropriate.' },
+  'indexability.canonical-cluster': { title: 'Shared canonical target', why: 'Several URLs pointing to one canonical can be intentional consolidation, but unexpected clusters may hide canonical mistakes.', fix: 'Verify that every URL in the cluster should consolidate to the declared canonical target.' },
+  'hreflang.invalid': { title: 'Invalid hreflang reference', why: 'Invalid hreflang annotations cannot reliably communicate language or regional alternatives.', fix: 'Correct the language code and target URL.' },
+  'hreflang.missing-reciprocal': { title: 'Hreflang return link missing', why: 'Hreflang alternates should reference each other so the relationship can be understood consistently.', fix: 'Add the reciprocal hreflang reference on the target page when the relationship is intentional.' },
+  'schema.jsonld-invalid': { title: 'Invalid JSON-LD', why: 'Malformed JSON-LD cannot be parsed reliably as structured data.', fix: 'Correct the invalid JSON syntax and validate the structured-data block.' },
   'content.thin': { title: 'Thin content', why: 'Very little unique page content can make it difficult to demonstrate a clear purpose or satisfy a search intent.', fix: 'Review whether the page needs more useful original content, should be consolidated with another page, or is intentionally lightweight.' },
 };
 
@@ -191,7 +202,7 @@ export default function Home() {
   function goToIssues(severity?: string) { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSeverity(severity ?? 'all'); setIssueSearch(''); setView('issues'); }
 
   return <main>
-    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.4.0</div></header>
+    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.5.0 DEV</div></header>
     {error && <div className="alert">{error}</div>}
     <section className="workspace">
       <aside className="sidebar panel">

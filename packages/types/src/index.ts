@@ -1,5 +1,23 @@
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
+export type RemediationMode = 'auto' | 'approval' | 'manual' | 'unsupported';
+export type RemediationRisk = 'low' | 'medium' | 'high';
+export type RemediationPlatform = 'generic' | 'wordpress' | 'woocommerce' | 'rank-math' | 'yoast' | 'aioseo' | 'shopify';
+
+export interface RemediationDefinition {
+  supported: boolean;
+  risk: RemediationRisk;
+  mode: RemediationMode;
+  platforms: RemediationPlatform[];
+  action?: string;
+}
+
+export interface HreflangReference {
+  lang: string;
+  href: string;
+}
+
+
 export type RuleCategory =
   | 'crawlability'
   | 'indexability'
@@ -47,6 +65,10 @@ export interface PageFacts {
   images: PageImage[];
   links: PageLink[];
   schemaTypes: string[];
+  hreflang?: HreflangReference[];
+  jsonLdBlocks?: number;
+  jsonLdErrors?: number;
+  contentHash?: string | null;
   contentLength?: number | null;
   contentEncoding?: string | null;
   contentLanguage?: string | null;
@@ -79,6 +101,7 @@ export interface SeoRule {
   description: string;
   severity: Severity;
   category: RuleCategory;
+  remediation?: RemediationDefinition;
   evaluate(page: PageFacts): RuleFinding[];
 }
 

@@ -4,7 +4,7 @@ import { loadConfig } from '@seo-auditor/config';
 import { crawlSite } from '@seo-auditor/crawler';
 import { db } from '@seo-auditor/database';
 import { AUDIT_QUEUE } from '@seo-auditor/queue';
-import { evaluatePage } from '@seo-auditor/rules';
+import { evaluateAudit, evaluatePage } from '@seo-auditor/rules';
 import { score } from '@seo-auditor/scoring';
 import type { CrawlJob, RuleFinding } from '@seo-auditor/types';
 
@@ -60,7 +60,10 @@ new Worker<CrawlJob>(
         },
 
         onPage: async (pageFacts) => {
-          const state = await db.audit.findUnique({ where: { id: job.data.auditId }, select: { cancelRequested: true } });
+          const state = await db.audit.findUnique({
+            where: { id: job.data.auditId },
+            select: { cancelRequested: true },
+          });
           if (state?.cancelRequested) throw new Error('AUDIT_CANCELLED');
           const pageFindings = evaluatePage(pageFacts);
 
@@ -80,6 +83,12 @@ new Worker<CrawlJob>(
                 h2: pageFacts.h2,
                 wordCount: pageFacts.wordCount,
                 schemaTypes: pageFacts.schemaTypes,
+                images: JSON.parse(JSON.stringify(pageFacts.images)),
+                outgoingLinks: JSON.parse(JSON.stringify(pageFacts.links)),
+                hreflang: JSON.parse(JSON.stringify(pageFacts.hreflang ?? [])),
+                jsonLdBlocks: pageFacts.jsonLdBlocks ?? 0,
+                jsonLdErrors: pageFacts.jsonLdErrors ?? 0,
+                contentHash: pageFacts.contentHash,
                 redirectChain: pageFacts.redirectHops ?? undefined,
                 contentType: pageFacts.contentType,
                 contentLength: pageFacts.contentLength,
@@ -114,6 +123,47 @@ new Worker<CrawlJob>(
           pageCount += 1;
         },
       });
+
+      const persistedPages = await db.page.findMany({ where: { auditId: job.data.auditId } });
+      const advancedFindings = evaluateAudit(
+        persistedPages.map((page) => ({
+          id: page.id,
+          url: page.url,
+          finalUrl: page.finalUrl,
+          statusCode: page.statusCode,
+          contentType: page.contentType,
+          title: page.title,
+          metaDescription: page.metaDescription,
+          canonical: page.canonical,
+          robots: page.robots,
+          xRobotsTag: page.xRobotsTag,
+          crawlDepth: page.crawlDepth,
+          contentHash: page.contentHash,
+          outgoingLinks: (page.outgoingLinks ?? []) as Array<{
+            href: string;
+            text: string | null;
+            internal: boolean;
+          }>,
+          hreflang: (page.hreflang ?? []) as Array<{ lang: string; href: string }>,
+          jsonLdErrors: page.jsonLdErrors,
+        })),
+        job.data.startUrl,
+      );
+
+      if (advancedFindings.length > 0) {
+        await db.issue.createMany({
+          data: advancedFindings.map((finding) => ({
+            auditId: job.data.auditId,
+            pageId: finding.pageId,
+            ruleId: finding.ruleId,
+            severity: finding.severity,
+            category: finding.category,
+            message: finding.message,
+            evidence: finding.evidence ?? undefined,
+          })),
+        });
+        findings.push(...advancedFindings);
+      }
 
       await db.audit.update({
         where: {

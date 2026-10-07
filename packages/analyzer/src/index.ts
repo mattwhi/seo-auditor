@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as cheerio from 'cheerio';
 
 import type { PageFacts } from '@seo-auditor/types';
@@ -80,12 +81,16 @@ export function analyzeHtml(input: {
     );
 
   const schemaTypes: string[] = [];
+  let jsonLdBlocks = 0;
+  let jsonLdErrors = 0;
 
   $('script[type="application/ld+json"]').each((_, element) => {
+    jsonLdBlocks += 1;
     try {
       const json: unknown = JSON.parse($(element).text());
       collectSchemaTypes(json, schemaTypes);
     } catch {
+      jsonLdErrors += 1;
       // Invalid JSON-LD should not prevent the rest of the page from being analysed.
     }
   });
@@ -111,5 +116,13 @@ export function analyzeHtml(input: {
       .get(),
     links,
     schemaTypes: [...new Set(schemaTypes)],
+    hreflang: $('link[rel="alternate"][hreflang][href]').map((_, element) => {
+      const lang = clean($(element).attr('hreflang')) ?? '';
+      const rawHref = $(element).attr('href') ?? '';
+      try { return { lang: lang.toLowerCase(), href: new URL(rawHref, baseUrl).href }; } catch { return { lang: lang.toLowerCase(), href: rawHref }; }
+    }).get(),
+    jsonLdBlocks,
+    jsonLdErrors,
+    contentHash: bodyText ? createHash('sha256').update(bodyText.toLowerCase()).digest('hex') : null,
   };
 }
