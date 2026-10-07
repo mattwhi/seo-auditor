@@ -1,8 +1,15 @@
 # Changelog
 
-## [0.4.0] - Audit Platform
+## [0.4.0-rc.1] - 2026-10-07
 
-### Added
+### Release candidate
+- Froze the integrated v0.4 Audit Platform feature set for release validation.
+- Promoted the validated development build to v0.4.0 RC1 without changing crawler, rule, scoring, comparison, scheduling or regression behaviour.
+- Aligned workspace and UI release metadata for RC1 deployment.
+
+### Audit Platform features
+
+#### Added
 - Audit-to-audit comparison with stable finding lifecycle detection.
 - Project dashboard with recent audit history, score and regression summaries.
 - Automated daily, weekly and monthly audit schedules with duplicate-run protection.
@@ -10,7 +17,7 @@
 - Audit cancellation, audit/project deletion APIs and configurable retention cleanup.
 - Platform-oriented database indexes and persisted schedule configuration.
 
-### Changed
+#### Changed
 - Project navigation now exposes a Platform view for continuous monitoring workflows.
 
 ## [Unreleased]
