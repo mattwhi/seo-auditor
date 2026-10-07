@@ -191,7 +191,7 @@ export default function Home() {
   function goToIssues(severity?: string) { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSeverity(severity ?? 'all'); setIssueSearch(''); setView('issues'); }
 
   return <main>
-    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.4.0 RC1</div></header>
+    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.4.0</div></header>
     {error && <div className="alert">{error}</div>}
     <section className="workspace">
       <aside className="sidebar panel">

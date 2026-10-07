@@ -1,11 +1,11 @@
 # Changelog
 
-## [0.4.0-rc.1] - 2026-10-07
+## [0.4.0] - 2026-10-07
 
-### Release candidate
-- Froze the integrated v0.4 Audit Platform feature set for release validation.
-- Promoted the validated development build to v0.4.0 RC1 without changing crawler, rule, scoring, comparison, scheduling or regression behaviour.
-- Aligned workspace and UI release metadata for RC1 deployment.
+### Release
+- Promoted the validated v0.4.0 RC1 build to v0.4.0 with no functional crawler, rule, scoring, comparison, scheduling or regression changes.
+- Validated the integrated Audit Platform release through the full local gate and deployment checks.
+- Aligned workspace and UI release metadata for the v0.4.0 pre-alpha release.
 
 ### Audit Platform features
 
