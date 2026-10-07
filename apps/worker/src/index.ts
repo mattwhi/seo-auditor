@@ -26,6 +26,13 @@ new Worker<CrawlJob>(
     const findings: RuleFinding[] = [];
 
     try {
+      // A BullMQ retry must produce the same persisted audit result rather than
+      // appending a second copy of pages, findings or crawl failures.
+      await db.$transaction([
+        db.issue.deleteMany({ where: { auditId: job.data.auditId } }),
+        db.page.deleteMany({ where: { auditId: job.data.auditId } }),
+        db.crawlFailure.deleteMany({ where: { auditId: job.data.auditId } }),
+      ]);
       await crawlSite(job.data.startUrl, {
         maxUrls: job.data.maxUrls,
         concurrency: config.CRAWLER_PAGE_CONCURRENCY,
@@ -52,53 +59,55 @@ new Worker<CrawlJob>(
         },
 
         onPage: async (pageFacts) => {
-          const page = await db.page.create({
-            data: {
-              auditId: job.data.auditId,
-              url: pageFacts.url,
-              finalUrl: pageFacts.finalUrl,
-              statusCode: pageFacts.statusCode,
-              responseTimeMs: pageFacts.responseTimeMs,
-              title: pageFacts.title,
-              metaDescription: pageFacts.metaDescription,
-              canonical: pageFacts.canonical,
-              robots: pageFacts.robots,
-              h1: pageFacts.h1,
-              h2: pageFacts.h2,
-              wordCount: pageFacts.wordCount,
-              schemaTypes: pageFacts.schemaTypes,
-              redirectChain: pageFacts.redirectHops ?? undefined,
-              contentType: pageFacts.contentType,
-              contentLength: pageFacts.contentLength,
-              contentEncoding: pageFacts.contentEncoding,
-              contentLanguage: pageFacts.contentLanguage,
-              cacheControl: pageFacts.cacheControl,
-              etag: pageFacts.etag,
-              lastModified: pageFacts.lastModified,
-              xRobotsTag: pageFacts.xRobotsTag ?? [],
-              crawlDepth: pageFacts.crawlDepth,
-              redirectCount: pageFacts.redirectCount,
-              fetchAttempts: pageFacts.fetchAttempts,
-            },
-          });
-
           const pageFindings = evaluatePage(pageFacts);
 
-          findings.push(...pageFindings);
-
-          if (pageFindings.length > 0) {
-            await db.issue.createMany({
-              data: pageFindings.map((finding) => ({
+          await db.$transaction(async (tx) => {
+            const page = await tx.page.create({
+              data: {
                 auditId: job.data.auditId,
-                pageId: page.id,
-                ruleId: finding.ruleId,
-                severity: finding.severity,
-                category: finding.category,
-                message: finding.message,
-                evidence: finding.evidence ?? undefined,
-              })),
+                url: pageFacts.url,
+                finalUrl: pageFacts.finalUrl,
+                statusCode: pageFacts.statusCode,
+                responseTimeMs: pageFacts.responseTimeMs,
+                title: pageFacts.title,
+                metaDescription: pageFacts.metaDescription,
+                canonical: pageFacts.canonical,
+                robots: pageFacts.robots,
+                h1: pageFacts.h1,
+                h2: pageFacts.h2,
+                wordCount: pageFacts.wordCount,
+                schemaTypes: pageFacts.schemaTypes,
+                redirectChain: pageFacts.redirectHops ?? undefined,
+                contentType: pageFacts.contentType,
+                contentLength: pageFacts.contentLength,
+                contentEncoding: pageFacts.contentEncoding,
+                contentLanguage: pageFacts.contentLanguage,
+                cacheControl: pageFacts.cacheControl,
+                etag: pageFacts.etag,
+                lastModified: pageFacts.lastModified,
+                xRobotsTag: pageFacts.xRobotsTag ?? [],
+                crawlDepth: pageFacts.crawlDepth,
+                redirectCount: pageFacts.redirectCount,
+                fetchAttempts: pageFacts.fetchAttempts,
+              },
             });
-          }
+
+            if (pageFindings.length > 0) {
+              await tx.issue.createMany({
+                data: pageFindings.map((finding) => ({
+                  auditId: job.data.auditId,
+                  pageId: page.id,
+                  ruleId: finding.ruleId,
+                  severity: finding.severity,
+                  category: finding.category,
+                  message: finding.message,
+                  evidence: finding.evidence ?? undefined,
+                })),
+              });
+            }
+          });
+
+          findings.push(...pageFindings);
         },
       });
 

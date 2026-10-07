@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### v0.3 SEO Rule Engine
+
+- Added core technical SEO rules for HTTP status, redirects, metadata, headings, indexability and canonical evidence
+- Persist page facts and their rule findings atomically so partial page analysis cannot leave orphaned results
+- Reset persisted audit results before a BullMQ retry so reruns are idempotent
+- Added paginated audit page/finding APIs plus severity, category and rule summaries for the dashboard
+- Added per-page finding retrieval for evidence drill-down
+- Added a validated rule registry with stable namespaced ID enforcement
+- Added a deterministic rule execution engine
+- Added fail-fast validation that finding ID, severity and category match rule metadata
+- Added dedicated rule-engine contract tests and expanded rule authoring documentation
+
 ## [0.2.1] - 2026-10-07
 
 - Updated the web milestone page to reflect the completed v0.2 crawler release
