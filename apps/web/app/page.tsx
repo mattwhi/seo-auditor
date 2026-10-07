@@ -149,7 +149,7 @@ export default function Home() {
   function goToIssues(severity?: string) { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSeverity(severity ?? 'all'); setIssueSearch(''); setView('issues'); }
 
   return <main>
-    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · v0.3 DEVELOPMENT</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">Slice 5B</div></header>
+    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · v0.3 DEVELOPMENT</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.3.0 RC1</div></header>
     {error && <div className="alert">{error}</div>}
     <section className="workspace">
       <aside className="sidebar panel">
@@ -159,7 +159,7 @@ export default function Home() {
       </aside>
       <div className="content">
         <section className="panel hero-panel"><div><span className="eyebrow">SELECTED PROJECT</span><h2>{project?.name ?? 'Create a project to begin'}</h2><p>{project?.baseUrl ?? 'Add a site and launch its first technical SEO audit.'}</p></div><button className="primary start" disabled={!selectedProject || busy} onClick={startAudit}>{busy ? 'Working…' : 'Start new audit'}</button></section>
-        {audits.length > 0 && <section className="audit-strip"><label>Audit<select value={selectedAudit} onChange={(e) => setSelectedAudit(e.target.value)}>{audits.map((item) => <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString()} · {item.status}</option>)}</select></label><span className={`status ${audit?.status ?? ''}`}>{audit?.status ?? '—'}</span></section>}
+        {audits.length > 0 && <section className="audit-strip"><label>Audit<select value={selectedAudit} onChange={(e) => setSelectedAudit(e.target.value)}>{audits.map((item) => { const status = item.id === selectedAudit && audit ? audit.status : item.status; return <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString()} · {status}</option>; })}</select></label><span className={`status ${audit?.status ?? ''}`}>{audit?.status ?? '—'}</span></section>}
         {audit ? <>
           <nav className="view-tabs" aria-label="Audit results">{(['overview','issues','pages','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
           {view === 'overview' && <>

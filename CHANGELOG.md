@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### v0.3.0 RC1
+
+- Prepared the v0.3 release candidate after successful real-world end-to-end auditing.
+- Fixed the audit selector so the selected audit reflects its latest polled status instead of stale history data.
+- Replaced the development slice badge with the v0.3.0 RC1 release identifier.
+- Includes the Slice 5C scoring and false-positive hardening validated against a fresh 224-page audit.
+
 ### v0.3 Slice 5B
 
 - Added issue drill-down workspaces with affected URL tables and deterministic evidence inspection.
