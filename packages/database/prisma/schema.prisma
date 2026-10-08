@@ -179,3 +179,17 @@ model RemediationProposal {
   @@index([auditId, issueId])
   @@index([status])
 }
+
+
+/// v0.8.3 immutable read-only preflight history; no execution credentials or write APIs.
+model RemediationPreflight {
+  id            String   @id @default(cuid())
+  proposalId    String
+  snapshotHash  String
+  adapter       String
+  field         String
+  originalValue String   @db.Text
+  conflict      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  @@index([proposalId, createdAt])
+}

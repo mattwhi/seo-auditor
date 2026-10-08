@@ -1,12 +1,12 @@
 import Fastify from 'fastify';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, createHash } from 'node:crypto';
 import { z } from 'zod';
 import { db } from '@seo-auditor/database';
 import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
 import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
-import { discoverWordpress, remediationPreview, wordpressConnectionStatus, wordpressIssueMapping, wordpressConfig } from './wordpress.js';
+import { discoverWordpress, remediationPreview, wordpressConnectionStatus, wordpressIssueMapping, wordpressConfig, wordpressSeoSnapshot } from './wordpress.js';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
@@ -138,6 +138,57 @@ app.post('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) =
     proposedText: input.data.proposedText, status: 'draft',
   } });
   return reply.code(201).send({ ...proposal, executable: false });
+});
+// v0.8.3: operator-only, strictly read-only preflight. No execution route is registered.
+// An approved proposal is NOT permission to write. The snapshot records a hash of
+// plugin-owned metadata and must be rechecked by a future execution adapter.
+const preflightParams = z.object({ proposalId: z.string().min(1) });
+app.post('/api/v1/wordpress/proposals/:proposalId/preflight', async (req, reply) => {
+  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  const parsed = preflightParams.safeParse(req.params);
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
+  const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId } });
+  if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
+  if (proposal.status !== 'approved') return reply.code(409).send({ error: 'proposal_not_approved' });
+  const project = await db.project.findUnique({ where: { id: proposal.projectId } });
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  try {
+    const mapping = await wordpressIssueMapping(project.baseUrl, proposal.pageUrl);
+    if (mapping.status !== 'matched' || mapping.matches.length !== 1 ||
+        mapping.matches[0]?.type !== proposal.targetType || mapping.matches[0]?.id !== proposal.targetId) {
+      return reply.code(409).send({ error: 'wordpress_target_changed' });
+    }
+    const snapshot = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
+    if (!snapshot.verified) return reply.code(409).send({ error: snapshot.reason, executable: false });
+    const digest = createHash('sha256').update(JSON.stringify({
+      type: proposal.targetType, id: proposal.targetId, field: snapshot.field, value: snapshot.value,
+    })).digest('hex');
+    const previous = await db.remediationPreflight.findFirst({
+      where: { proposalId: proposal.id }, orderBy: { createdAt: 'desc' },
+    });
+    const conflict = Boolean(previous && previous.snapshotHash !== digest);
+    const saved = await db.remediationPreflight.create({ data: {
+      proposalId: proposal.id, snapshotHash: digest, adapter: snapshot.adapter,
+      field: snapshot.field, originalValue: snapshot.value, conflict,
+    } });
+    return { id: saved.id, proposalId: proposal.id, status: conflict ? 'conflict' : 'ready_for_review',
+      adapter: snapshot.adapter, field: snapshot.field, originalValue: snapshot.value,
+      proposedText: proposal.proposedText, snapshotHash: digest, conflict,
+      executable: false, note: 'Read-only preflight. WordPress was not modified.' };
+  } catch (error) {
+    req.log.warn({ code: error instanceof Error ? error.message : 'wordpress_preflight_failed' }, 'WordPress preflight failed');
+    return reply.code(502).send({ error: 'wordpress_preflight_failed', executable: false });
+  }
+});
+app.get('/api/v1/wordpress/proposals/:proposalId/preflights', async (req, reply) => {
+  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  const parsed = preflightParams.safeParse(req.params);
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
+  const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId }, select: { id: true } });
+  if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
+  return { executable: false, items: await db.remediationPreflight.findMany({
+    where: { proposalId: proposal.id }, orderBy: { createdAt: 'desc' }, take: 50,
+  }) };
 });
 for (const decision of ['approve', 'reject'] as const) {
   app.post(`/api/v1/wordpress/proposals/:proposalId/${decision}`, async (req, reply) => {

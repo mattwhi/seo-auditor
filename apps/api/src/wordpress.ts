@@ -156,3 +156,34 @@ export async function wordpressIssueMapping(baseUrl: string, pageUrl: string) {
   }
   return { status: matches.length === 1 ? 'matched' : 'manual_review', reason: matches.length > 1 ? 'ambiguous_matches' : matches.length === 0 ? 'no_exact_match' : null, matches };
 }
+
+
+/** v0.8.3 read-only SEO metadata snapshot.
+ * WordPress core does not expose Rank Math / Yoast private postmeta through
+ * standard REST responses. Never treat missing `meta` as an empty SEO value.
+ * A dedicated, authenticated, allowlisted plugin bridge is required for writes.
+ */
+export async function wordpressSeoSnapshot(baseUrl: string, targetType: string, targetId: number, ruleId: string): Promise<
+  { verified: true; adapter: string; field: string; value: string } |
+  { verified: false; reason: string }
+> {
+  if (!['posts', 'pages', 'product'].includes(targetType) || !Number.isSafeInteger(targetId) || targetId < 1) {
+    return { verified: false, reason: 'invalid_wordpress_target' };
+  }
+  const field = ruleId.startsWith('description.') ? 'rank_math_description' : ruleId.startsWith('title.') ? 'rank_math_title' : null;
+  if (!field) return { verified: false, reason: 'unsupported_rule' };
+  const response = await wordpressRead(baseUrl, `/wp-json/wp/v2/${targetType}/${targetId}?context=edit&_fields=id,meta`);
+  if (!response.ok) return { verified: false, reason: `wordpress_read_http_${response.status}` };
+  const data: unknown = await response.json();
+  if (!data || typeof data !== 'object') return { verified: false, reason: 'wordpress_invalid_metadata' };
+  const item = data as { id?: unknown; meta?: unknown };
+  if (item.id !== targetId || !item.meta || typeof item.meta !== 'object' || Array.isArray(item.meta)) {
+    return { verified: false, reason: 'seo_metadata_not_exposed' };
+  }
+  const meta = item.meta as Record<string, unknown>;
+  // Own property is required; absent private metadata is not proof of an empty value.
+  if (!Object.prototype.hasOwnProperty.call(meta, field) || typeof meta[field] !== 'string') {
+    return { verified: false, reason: 'seo_metadata_not_exposed' };
+  }
+  return { verified: true, adapter: 'rank_math_rest_readonly', field, value: meta[field] as string };
+}
