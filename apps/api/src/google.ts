@@ -65,8 +65,34 @@ async function accessToken(): Promise<string> {
 
 async function googlePost(url: string, payload: object): Promise<unknown> {
   const token = await accessToken();
-  const response = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error(`google_api_http_${response.status}`);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+
+    const googleError =
+      body && typeof body === 'object' && 'error' in body
+        ? (body as { error?: { message?: string; status?: string } }).error
+        : undefined;
+
+    console.error('Google API request failed', {
+      status: response.status,
+      googleStatus: googleError?.status,
+      message: googleError?.message ?? 'Unknown Google API error',
+    });
+
+    throw new Error(`google_api_http_${response.status}`);
+  }
+
   return response.json();
 }
 
