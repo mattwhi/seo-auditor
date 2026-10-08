@@ -157,3 +157,25 @@ model PerformanceResult {
   @@unique([auditId, strategy, url])
   @@index([auditId])
 }
+
+
+/// v0.8.2 operator-reviewed remediation proposals. No live WordPress writes.
+model RemediationProposal {
+  id           String   @id @default(cuid())
+  auditId      String
+  issueId      String
+  projectId    String
+  pageUrl      String
+  ruleId       String
+  targetType   String
+  targetId     Int
+  proposedText String   @db.Text
+  status       String   @default("draft")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  approvedAt   DateTime?
+  rejectedAt   DateTime?
+  @@index([projectId, createdAt])
+  @@index([auditId, issueId])
+  @@index([status])
+}

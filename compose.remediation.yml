@@ -1,0 +1,7 @@
+# API-only operator token. Create /opt/seo-auditor/secrets/remediation.env
+# with mode 0600; do not add REMEDIATION_OPERATOR_TOKEN to the shared .env.
+services:
+  api:
+    env_file:
+      - .env
+      - /opt/seo-auditor/secrets/remediation.env

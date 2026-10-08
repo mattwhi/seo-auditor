@@ -1,11 +1,12 @@
 import Fastify from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { db } from '@seo-auditor/database';
 import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
 import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
-import { discoverWordpress, remediationPreview, wordpressConnectionStatus, wordpressIssueMapping } from './wordpress.js';
+import { discoverWordpress, remediationPreview, wordpressConnectionStatus, wordpressIssueMapping, wordpressConfig } from './wordpress.js';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
@@ -85,6 +86,73 @@ app.get('/api/v1/audits/:auditId/wordpress/remediation-preview', async (req, rep
   try { return remediationPreview(issue.ruleId, issue.page.finalUrl, issue.audit.project.baseUrl); }
   catch { return reply.code(409).send({ error: 'issue_page_outside_project' }); }
 });
+// v0.8.2: API-only operator gate. No browser-held token, no WordPress mutations.
+// Never log or return the bearer token. Set REMEDIATION_OPERATOR_TOKEN only on API.
+function operatorAuthorized(authorization: string | undefined): boolean {
+  const expected = process.env.REMEDIATION_OPERATOR_TOKEN;
+  if (!expected || expected.length < 32 || !authorization?.startsWith('Bearer ')) return false;
+  const received = Buffer.from(authorization.slice(7), 'utf8');
+  const secret = Buffer.from(expected, 'utf8');
+  return received.length === secret.length && timingSafeEqual(received, secret);
+}
+const proposalInput = z.object({
+  auditId: z.string().min(1), issueId: z.string().min(1),
+  targetType: z.enum(['posts', 'pages', 'product']), targetId: z.number().int().positive(),
+  proposedText: z.string().trim().min(3).max(500),
+}).strict();
+const proposalId = z.object({ proposalId: z.string().min(1) });
+const proposalRead = z.object({ projectId: z.string().min(1) });
+const allowedProposalRules = new Set(['title.missing', 'title.too-short', 'title.too-long', 'description.missing', 'description.too-short', 'description.too-long']);
+app.get('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) => {
+  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  const parsed = proposalRead.safeParse(req.params);
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_project' });
+  return db.remediationProposal.findMany({ where: { projectId: parsed.data.projectId }, orderBy: { createdAt: 'desc' }, take: 100 });
+});
+app.post('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) => {
+  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  const projectParams = proposalRead.safeParse(req.params);
+  const input = proposalInput.safeParse(req.body);
+  if (!projectParams.success || !input.success) return reply.code(400).send({ error: 'invalid_proposal' });
+  const project = await db.project.findUnique({ where: { id: projectParams.data.projectId } });
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  try { if (!wordpressConfig(project.baseUrl)) return reply.code(409).send({ error: 'wordpress_not_enabled' }); }
+  catch { return reply.code(409).send({ error: 'wordpress_configuration_invalid' }); }
+  const issue = await db.issue.findFirst({
+    where: { id: input.data.issueId, auditId: input.data.auditId, audit: { projectId: project.id } },
+    include: { page: true },
+  });
+  if (!issue?.page) return reply.code(404).send({ error: 'issue_not_found' });
+  if (!allowedProposalRules.has(issue.ruleId)) return reply.code(409).send({ error: 'rule_requires_manual_review' });
+  // Verify that the claimed WordPress object really matches the audited URL.
+  let mapping;
+  try { mapping = await wordpressIssueMapping(project.baseUrl, issue.page.finalUrl); }
+  catch { return reply.code(502).send({ error: 'wordpress_mapping_failed' }); }
+  if (mapping.status !== 'matched' || !mapping.matches.some((m) => m.type === input.data.targetType && m.id === input.data.targetId)) {
+    return reply.code(409).send({ error: 'wordpress_target_not_verified' });
+  }
+  const proposal = await db.remediationProposal.create({ data: {
+    projectId: project.id, auditId: input.data.auditId, issueId: issue.id,
+    pageUrl: issue.page.finalUrl, ruleId: issue.ruleId,
+    targetType: input.data.targetType, targetId: input.data.targetId,
+    proposedText: input.data.proposedText, status: 'draft',
+  } });
+  return reply.code(201).send({ ...proposal, executable: false });
+});
+for (const decision of ['approve', 'reject'] as const) {
+  app.post(`/api/v1/wordpress/proposals/:proposalId/${decision}`, async (req, reply) => {
+    if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+    const parsed = proposalId.safeParse(req.params);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
+    const changed = await db.remediationProposal.updateMany({
+      where: { id: parsed.data.proposalId, status: 'draft' },
+      data: decision === 'approve' ? { status: 'approved', approvedAt: new Date() } : { status: 'rejected', rejectedAt: new Date() },
+    });
+    if (!changed.count) return reply.code(409).send({ error: 'proposal_not_draft_or_missing' });
+    const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId } });
+    return { ...proposal, executable: false, note: 'Decision recorded. WordPress was not modified.' };
+  });
+}
 app.post('/api/v1/projects', async (req, reply) => {
   const x = z.object({ name: z.string().min(1), baseUrl: z.string().url() }).safeParse(req.body);
   if (!x.success) return reply.code(400).send({ error: x.error.flatten() });
