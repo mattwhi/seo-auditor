@@ -25,3 +25,18 @@ test('sample deterministic representative indexable pages', () => {
   assert.deepEqual(selected.map((s) => s.pageType), ['homepage', 'category', 'product', 'article']);
   assert.equal(selected.length, 4);
 });
+
+
+test('archives are not mistaken for articles and actual posts are sampled', () => {
+  const make = (path) => ({ url: `https://example.com${path}`, finalUrl: `https://example.com${path}`, statusCode: 200, contentType: 'text/html', canonical: null, robots: [], xRobotsTag: [], crawlDepth: 2 });
+  const result = selectPerformanceTargets('https://example.com/', [make('/category/dog-treat-guides/'), make('/product-category/dogs/'), make('/product/bone/'), make('/dog-treat-guides/are-pig-ears-good-for-dogs/')]);
+  assert.deepEqual(result.map((p) => p.pageType), ['homepage', 'category', 'product', 'article']);
+  assert.equal(result.at(-1).url, 'https://example.com/dog-treat-guides/are-pig-ears-good-for-dogs/');
+});
+
+test('diagnostics retain bounded resource evidence and measurement context', () => {
+  const result = parsePageSpeed({ lighthouseResult: { lighthouseVersion: '12.7.0', fetchTime: '2026-10-08T12:00:00Z', finalDisplayedUrl: 'https://example.com/', audits: { 'render-blocking-resources': { title: 'Render blocking', details: { items: [{ url: 'https://example.com/main.css', transferSize: 2048, wastedMs: 500 }] } } } } }, 'mobile', 'https://example.com/');
+  assert.equal(result.context.lighthouseVersion, '12.7.0');
+  assert.equal(result.diagnostics[0].resources[0].url, 'https://example.com/main.css');
+  assert.equal(result.diagnostics[0].resources[0].wastedMs, 500);
+});
