@@ -1,3 +1,4 @@
+import { isNonContentUtilityUrl } from './utility-links.js';
 import { analyzeHtml } from '@seo-auditor/analyzer';
 import type { CrawlFailure, PageFacts } from '@seo-auditor/types';
 import { extractHttpResponseMetadata } from './http-metadata.js';
@@ -210,7 +211,7 @@ export async function crawlSite(startUrl: string, options: CrawlOptions): Promis
 
         try {
           const normalizedUrl = normalizeUrl(link.href);
-          if (isSameOrigin(normalizedUrl, origin)) {
+          if (isSameOrigin(normalizedUrl, origin) && !isNonContentUtilityUrl(normalizedUrl)) {
             queue.enqueue(normalizedUrl, result.depth + 1);
           }
         } catch {

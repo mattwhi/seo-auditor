@@ -14,3 +14,5 @@
 @media(max-width:520px){.comparison-metrics{grid-template-columns:1fr}}
 
 .hero-actions { display:flex; align-items:center; gap:12px; }
+.evidence-fields{display:grid;gap:12px;font-size:12px}.evidence-fields>div{display:grid;gap:5px;min-width:0}.evidence-fields strong{color:#7dd3fc;text-transform:capitalize}.evidence-fields span,.evidence-list{overflow-wrap:anywhere}.evidence-list{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px}.evidence-list>div{padding:7px 0;border-bottom:1px solid var(--line)}.evidence-list>div:last-child{border:0}
+@media(min-width:1100px){.detail-grid{grid-template-columns:minmax(0,1.1fr) minmax(350px,1fr)}}

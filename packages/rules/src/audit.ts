@@ -93,6 +93,9 @@ const htmlSuccess = (p: AuditPageFacts) =>
   p.statusCode < 300 &&
   (p.contentType ?? '').toLowerCase().includes('text/html');
 const normalized = (value: string) => value.trim().replace(/\/$/, '').toLowerCase();
+const isUtilityLink = (href: string): boolean => {
+  try { return new URL(href).pathname.replace(/\/$/, '') === '/cdn-cgi/l/email-protection'; } catch { return false; }
+};
 const issue = (
   pageId: string | null,
   ruleId: string,
@@ -113,65 +116,56 @@ export function evaluateAudit(
     byUrl.set(normalized(page.finalUrl), page);
   }
 
+  // A duplicate is actionable only when at least two independently indexable URLs compete.
+  const preferred = (page: AuditPageFacts): boolean => {
+    if (!htmlSuccess(page)) return false;
+    const directives = [...page.robots, ...page.xRobotsTag].join(',').toLowerCase();
+    if (/(^|[,\s])noindex([,\s]|$)/.test(directives)) return false;
+    if (!page.canonical) return true; // Unknown canonical state: retain the URL.
+    try {
+      return normalized(new URL(page.canonical, page.finalUrl).href) === normalized(page.finalUrl);
+    } catch {
+      return false; // Invalid canonicals are covered by page-level validation.
+    }
+  };
   const duplicateGroups = (field: 'title' | 'metaDescription' | 'contentHash') => {
     const groups = new Map<string, AuditPageFacts[]>();
-    for (const p of pages) {
-      if (!htmlSuccess(p)) continue;
-      const raw = p[field];
-      if (!raw) continue;
-      const key = normalized(raw);
+    for (const page of pages) {
+      if (!htmlSuccess(page) || !page[field]) continue;
+      const key = normalized(page[field]!);
       const group = groups.get(key) ?? [];
-      group.push(p);
+      group.push(page);
       groups.set(key, group);
     }
-    return [...groups.values()].filter((g) => g.length > 1);
+    return [...groups.values()].filter((group) => group.length > 1);
   };
-
-  for (const group of duplicateGroups('title'))
-    for (const p of group)
-      findings.push(
-        issue(
-          p.id,
-          'metadata.title-duplicate',
-          'medium',
-          'metadata',
-          'Page title is duplicated across multiple indexable HTML pages.',
-          { title: p.title, count: group.length, urls: group.map((x) => x.finalUrl) },
-        ),
-      );
-  for (const group of duplicateGroups('metaDescription'))
-    for (const p of group)
-      findings.push(
-        issue(
-          p.id,
-          'metadata.description-duplicate',
-          'low',
-          'metadata',
-          'Meta description is duplicated across multiple indexable HTML pages.',
-          {
-            description: p.metaDescription,
-            count: group.length,
-            urls: group.map((x) => x.finalUrl),
-          },
-        ),
-      );
-  for (const group of duplicateGroups('contentHash'))
-    for (const p of group)
-      findings.push(
-        issue(
-          p.id,
-          'content.duplicate',
-          'medium',
-          'content',
-          'Page body content is identical to another crawled HTML page.',
-          { count: group.length, urls: group.map((x) => x.finalUrl) },
-        ),
-      );
+  const duplicates: Array<{ field: 'title' | 'metaDescription' | 'contentHash'; rule: string; severity: Severity; category: RuleCategory; label: string }> = [
+    { field: 'title', rule: 'metadata.title-duplicate', severity: 'medium', category: 'metadata', label: 'Page title' },
+    { field: 'metaDescription', rule: 'metadata.description-duplicate', severity: 'low', category: 'metadata', label: 'Meta description' },
+    { field: 'contentHash', rule: 'content.duplicate', severity: 'medium', category: 'content', label: 'Page body content' },
+  ];
+  for (const definition of duplicates) {
+    for (const group of duplicateGroups(definition.field)) {
+      const competing = group.filter(preferred);
+      const actionable = competing.length > 1;
+      for (const page of group) {
+        const isActionable = actionable && preferred(page);
+        findings.push(issue(page.id, definition.rule, isActionable ? definition.severity : 'info', definition.category,
+          isActionable ? `${definition.label} is duplicated across independently indexable HTML pages.` : `${definition.label} is shared by URL variants; check canonical and indexing intent.`,
+          { value: page[definition.field], count: group.length, competingCount: competing.length, urls: group.map((item) => item.finalUrl), competingUrls: competing.map((item) => item.finalUrl), classification: isActionable ? 'competing-indexable' : 'canonical-or-nonindex-variant' }));
+      }
+    }
+  }
 
   const incoming = new Map<string, number>();
   for (const p of pages) incoming.set(normalized(p.finalUrl), 0);
   for (const p of pages) {
+    const seenLinks = new Set<string>();
     for (const link of p.outgoingLinks.filter((l) => l.internal)) {
+      if (isUtilityLink(link.href)) continue;
+      const linkKey = normalized(link.href);
+      if (seenLinks.has(linkKey)) continue;
+      seenLinks.add(linkKey);
       const target = byUrl.get(normalized(link.href));
       if (target)
         incoming.set(
@@ -213,9 +207,9 @@ export function evaluateAudit(
         issue(
           p.id,
           'links.orphan',
-          'medium',
+          'info',
           'links',
-          'Crawled page has no incoming internal links from other crawled pages.',
+          'Potential orphan: no incoming links were observed among crawled pages. This does not prove the page is orphaned.',
           { url: p.finalUrl },
         ),
       );
