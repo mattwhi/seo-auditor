@@ -1,0 +1,7 @@
+# Optional operator UI. This file is kept on the VM and must not be committed with secrets.
+# Create /opt/seo-auditor/secrets/remediation-ui.env readable by the Docker Compose operator.
+services:
+  web:
+    env_file:
+      - .env
+      - /opt/seo-auditor/secrets/remediation-ui.env
