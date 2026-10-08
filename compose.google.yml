@@ -1,0 +1,14 @@
+# Add this override to the production Compose invocation after compose.vm.yml.
+# Keep the secret on the host; do not commit it or inject its contents into .env.
+services:
+  api:
+    environment:
+      GOOGLE_INTEGRATIONS_ENABLED: ${GOOGLE_INTEGRATIONS_ENABLED:-false}
+      GOOGLE_PROJECT_PROPERTIES: ${GOOGLE_PROJECT_PROPERTIES:-'{}'}
+      GOOGLE_SERVICE_ACCOUNT_FILE: /run/secrets/google-service-account.json
+      GOOGLE_SERVICE_ACCOUNT_JSON: !reset null
+    volumes:
+      - type: bind
+        source: /opt/seo-auditor/secrets/google-service-account.json
+        target: /run/secrets/google-service-account.json
+        read_only: true

@@ -2,6 +2,7 @@
  * Credentials never leave the API process. No browser tokens or OAuth redirects.
  */
 import { createSign } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 type ServiceAccount = { client_email: string; private_key: string; token_uri?: string };
 type GoogleConfig = { searchConsoleSiteUrl?: string; ga4PropertyId?: string };
@@ -19,8 +20,22 @@ export function getGoogleConfig(baseUrl: string): GoogleConfig {
   return candidate && typeof candidate === 'object' && !Array.isArray(candidate) ? candidate : {};
 }
 
-function credentials(): ServiceAccount {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+function credentialsRaw(): string | undefined {
+  // Prefer a read-only mounted secret over environment-injected private key material.
+  const file = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
+  if (file) {
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      // Do not include the filesystem path or contents in API errors.
+      throw new Error('google_credentials_file_unreadable');
+    }
+  }
+  return process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+}
+
+export function credentials(): ServiceAccount {
+  const raw = credentialsRaw();
   if (!raw) throw new Error('google_credentials_missing');
   const parsed: unknown = JSON.parse(raw);
   if (!parsed || typeof parsed !== 'object') throw new Error('google_credentials_invalid');
@@ -57,7 +72,7 @@ async function googlePost(url: string, payload: object): Promise<unknown> {
 
 export function googleStatus(baseUrl: string) {
   const config = enabled() ? getGoogleConfig(baseUrl) : {};
-  return { enabled: enabled(), credentialsConfigured: Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON), searchConsoleConfigured: Boolean(config.searchConsoleSiteUrl), analyticsConfigured: Boolean(config.ga4PropertyId) };
+  return { enabled: enabled(), credentialsConfigured: Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_FILE || process.env.GOOGLE_SERVICE_ACCOUNT_JSON), searchConsoleConfigured: Boolean(config.searchConsoleSiteUrl), analyticsConfigured: Boolean(config.ga4PropertyId) };
 }
 
 export async function searchConsoleReport(baseUrl: string, startDate: string, endDate: string) {
