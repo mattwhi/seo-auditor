@@ -5,6 +5,7 @@ import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
 import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
+import { discoverWordpress, remediationPreview } from './wordpress.js';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
@@ -45,6 +46,24 @@ for (const [kind, reporter] of [['search-console', searchConsoleReport], ['analy
     }
   });
 }
+// v0.8: opt-in public WordPress discovery and draft-only remediation guidance.
+// No write/approval endpoints until operator authentication and scoped permissions exist.
+app.get('/api/v1/projects/:projectId/wordpress/status', async (req, reply) => {
+  const { projectId } = z.object({ projectId: z.string().min(1) }).parse(req.params);
+  const project = await googleProject(projectId);
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  try { return await discoverWordpress(project.baseUrl); }
+  catch { return reply.code(409).send({ error: 'wordpress_configuration_invalid' }); }
+});
+app.get('/api/v1/audits/:auditId/wordpress/remediation-preview', async (req, reply) => {
+  const { auditId } = z.object({ auditId: z.string().min(1) }).parse(req.params);
+  const { issueId } = z.object({ issueId: z.string().min(1) }).parse(req.query);
+  const issue = await db.issue.findFirst({ where: { id: issueId, auditId }, include: { page: true, audit: { include: { project: true } } } });
+  if (!issue) return reply.code(404).send({ error: 'issue_not_found' });
+  if (!issue.page) return reply.code(409).send({ error: 'issue_has_no_page' });
+  try { return remediationPreview(issue.ruleId, issue.page.finalUrl, issue.audit.project.baseUrl); }
+  catch { return reply.code(409).send({ error: 'issue_page_outside_project' }); }
+});
 app.post('/api/v1/projects', async (req, reply) => {
   const x = z.object({ name: z.string().min(1), baseUrl: z.string().url() }).safeParse(req.body);
   if (!x.success) return reply.code(400).send({ error: x.error.flatten() });

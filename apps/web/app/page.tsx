@@ -11,7 +11,8 @@ type Issue = { id: string; ruleId: string; severity: string; category: string; m
 type PerformanceResult = { id: string; pageType: string; strategy: string; url: string; status: string; lighthouseScore: number | null; measuredAt: string; error: string | null; metrics: { diagnostics?: Array<{ id: string; title: string; description: string | null; displayValue: string | null; score: number | null; savingsMs: number | null; element: string | null; resources?: Array<{ url: string | null; transferSize: number | null; totalBytes: number | null; wastedBytes: number | null; wastedMs: number | null; element: string | null }> }>; context?: { lighthouseVersion: string | null; fetchTime: string | null; requestedUrl: string; finalUrl: string | null }; fieldSource?: string; lcp: { value: number | null; displayValue: string | null }; cls: { value: number | null; displayValue: string | null }; fcp: { value: number | null; displayValue: string | null }; tbt: { value: number | null; displayValue: string | null }; speedIndex: { value: number | null; displayValue: string | null }; fieldLcp: number | null; fieldCls: number | null; fieldInp: number | null } };
 type CrawlFailure = { id: string; url: string; type: string; message: string; statusCode: number | null; attempts: number; createdAt: string };
 type PerformanceHistory = { auditId: string; createdAt: string; results: Array<{ url: string; pageType: string; strategy: string; lighthouseScore: number | null; status: string }> };
-type View = 'platform' | 'overview' | 'history' | 'issues' | 'pages' | 'failures' | 'performance' | 'google';
+type View = 'platform' | 'overview' | 'history' | 'issues' | 'pages' | 'failures' | 'performance' | 'google' | 'wordpress';
+type WordpressStatus = { enabled: boolean; restApi: boolean; wordpress: boolean; wooCommerce: boolean; namespaces: string[]; siteUrl?: string; error?: string };
 type GoogleStatus = { enabled: boolean; credentialsConfigured: boolean; searchConsoleConfigured: boolean; analyticsConfigured: boolean };
 type GscReport = { pages: Array<{ page: string; clicks: number; impressions: number; ctr: number; position: number }>; totals: { clicks: number; impressions: number }; note: string };
 type GaReport = { pages: Array<{ page: string; sessions: number; users: number; engagedSessions: number }>; note: string };
@@ -84,6 +85,9 @@ export default function Home() {
   const [failures, setFailures] = useState<CrawlFailure[]>([]);
   const [performance, setPerformance] = useState<PerformanceResult[]>([]);
   const [performanceHistory, setPerformanceHistory] = useState<PerformanceHistory[]>([]);
+  const [wordpressStatus, setWordpressStatus] = useState<WordpressStatus | null>(null);
+  const [wordpressBusy, setWordpressBusy] = useState(false);
+  const [wordpressError, setWordpressError] = useState('');
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
   const [gscReport, setGscReport] = useState<GscReport | null>(null);
   const [gaReport, setGaReport] = useState<GaReport | null>(null);
@@ -243,6 +247,14 @@ export default function Home() {
     finally { setGoogleBusy(false); }
   }
 
+  async function loadWordpress() {
+    if (!selectedProject) return;
+    setWordpressBusy(true); setWordpressError('');
+    try { setWordpressStatus(await json<WordpressStatus>(`${api}/projects/${selectedProject}/wordpress/status`)); }
+    catch { setWordpressError('Unable to check WordPress integration configuration.'); }
+    finally { setWordpressBusy(false); }
+  }
+
   function goToIssues(severity?: string) { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSeverity(severity ?? 'all'); setIssueSearch(''); setView('issues'); }
 
   return <main>
@@ -258,7 +270,7 @@ export default function Home() {
         <section className="panel hero-panel"><div><span className="eyebrow">SELECTED PROJECT</span><h2>{project?.name ?? 'Create a project to begin'}</h2><p>{project?.baseUrl ?? 'Add a site and launch its first technical SEO audit.'}</p></div><div className="hero-actions"><button className="text-button" disabled={!selectedProject} onClick={() => setView('platform')}>Project dashboard</button><button className="primary start" disabled={!selectedProject || busy} onClick={startAudit}>{busy ? 'Working…' : 'Start new audit'}</button></div></section>
         {audits.length > 0 && <section className="audit-strip"><label>Audit<select value={selectedAudit} onChange={(e) => setSelectedAudit(e.target.value)}>{audits.map((item) => { const status = item.id === selectedAudit && audit ? audit.status : item.status; return <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString()} · {status}</option>; })}</select></label><span className={`status ${audit?.status ?? ''}`}>{audit?.status ?? '—'}</span></section>}
         {audit ? <>
-          <nav className="view-tabs" aria-label="Audit results">{(['platform','overview','history','issues','pages','performance','google','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); if (item === 'google') void loadGoogleReports(); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
+          <nav className="view-tabs" aria-label="Audit results">{(['platform','overview','history','issues','pages','performance','google','wordpress','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); if (item === 'google') void loadGoogleReports(); if (item === 'wordpress') void loadWordpress(); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
           {view === 'platform' && platform && <section className="comparison-stack">
             <section className="metrics"><article><span>Latest score</span><strong>{platform.latest?.score ?? '—'}</strong></article><article><span>Previous score</span><strong>{platform.previous?.score ?? '—'}</strong></article><article><span>Completed audits</span><strong>{platform.audits.length}</strong></article><article><span>Regression changes</span><strong>{platform.regression ? platform.regression.issues.new.length : 0}</strong><small>new findings</small></article></section>
             {platform.regression && <ComparisonView comparison={platform.regression} />}
@@ -284,6 +296,20 @@ export default function Home() {
           </section>}
           {view === 'issues' && selectedRule && <IssueWorkspace rule={selectedRule} issues={visibleRuleIssues} total={filteredRuleIssues.length} search={issueSearch} setSearch={(value) => { setIssueSearch(value); setUrlPage(0); }} page={urlPage} setPage={setUrlPage} selected={selectedIssue} setSelected={setSelectedIssue} onBack={() => { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSearch(''); }} />}
           {view === 'pages' && <section className="panel"><div className="section-title"><div><span className="eyebrow">PAGES</span><h2>Crawl results</h2><p>Search across requested URL, final URL and page title.</p></div><span>{filteredPages.length} of {pages.length} pages</span></div><div className="filters single"><input placeholder="Search URLs or titles" value={pageSearch} onChange={(e) => { setPageSearch(e.target.value); setIssuePage(0); }} /></div><div className="table-wrap"><table><thead><tr><th>URL</th><th>Status</th><th>Depth</th><th>Response</th><th>Title</th><th>Issues</th></tr></thead><tbody>{visiblePages.map((page) => <tr key={page.id}><td className="url-cell" title={page.url}>{page.url}</td><td><span className={`http ${page.statusCode >= 400 ? 'bad' : page.statusCode >= 300 ? 'warn' : 'good'}`}>{page.statusCode}</span></td><td>{page.crawlDepth ?? '—'}</td><td>{page.responseTimeMs} ms</td><td className="title-cell">{page.title || <em>Missing</em>}</td><td>{page._count.issues}</td></tr>)}</tbody></table></div><Pager page={issuePage} total={filteredPages.length} setPage={setIssuePage} /></section>}
+          {view === 'wordpress' && <section className="panel">
+            <div className="section-title"><div><span className="eyebrow">v0.8 · PLATFORM PACKS</span><h2>WordPress &amp; WooCommerce</h2><p>Read-only platform discovery and remediation planning. No live changes can be applied.</p></div><button onClick={() => void loadWordpress()} disabled={wordpressBusy}>{wordpressBusy ? 'Checking…' : 'Refresh'}</button></div>
+            {wordpressError && <p role="alert">{wordpressError}</p>}
+            {!wordpressStatus && !wordpressError && <p>Check the project's WordPress REST API to identify available platform capabilities.</p>}
+            {wordpressStatus && <>
+              <p>Integration: <strong>{wordpressStatus.enabled ? 'Enabled' : 'Disabled'}</strong> · REST API: <strong>{wordpressStatus.restApi ? 'Available' : 'Unavailable'}</strong></p>
+              <p>WordPress routes: <strong>{wordpressStatus.wordpress ? 'Detected' : 'Not detected'}</strong> · WooCommerce routes: <strong>{wordpressStatus.wooCommerce ? 'Detected' : 'Not detected'}</strong></p>
+              {wordpressStatus.siteUrl && <p>Site: {wordpressStatus.siteUrl}</p>}
+              {wordpressStatus.error && <p role="alert">Discovery issue: {wordpressStatus.error}</p>}
+              {!wordpressStatus.enabled && <p>To enable, configure WORDPRESS_INTEGRATIONS_ENABLED and WORDPRESS_PROJECT_SITES on the API container.</p>}
+              {wordpressStatus.namespaces.length > 0 && <details><summary>Detected REST namespaces ({wordpressStatus.namespaces.length})</summary><p>{wordpressStatus.namespaces.join(' · ')}</p></details>}
+              <h3>Remediation workflow</h3><p>SEO findings remain separate from WordPress changes. Draft remediation guidance is available through the read-only API. Approval, execution, rollback and verification require an authenticated operator workflow and are deliberately disabled in this foundation release.</p>
+            </>}
+          </section>}
           {view === 'google' && <section className="panel">
             <div className="section-title"><div><span className="eyebrow">v0.7 · GOOGLE INTEGRATIONS</span><h2>Search Console &amp; Analytics</h2><p>Read-only Google reports. Last 28 complete days, ending three days ago. Separate from the SEO score.</p></div><button onClick={() => void loadGoogleReports()} disabled={googleBusy}>{googleBusy ? 'Loading…' : 'Refresh'}</button></div>
             {googleError && <p role="alert">{googleError}</p>}
