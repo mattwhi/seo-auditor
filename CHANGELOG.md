@@ -1,3 +1,8 @@
+## v0.8.4-dev.0 — WordPress metadata bridge and gated remediation (release candidate)
+
+- Authenticated Rank Math bridge plugin, snapshots, explicitly gated execute and rollback, conflict protection and durable execution records.
+- Live writes remain disabled by default. Staging acceptance testing is mandatory.
+
 # Changelog
 
 ## [0.4.0] - 2026-10-07

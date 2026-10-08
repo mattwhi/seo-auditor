@@ -193,3 +193,23 @@ model RemediationPreflight {
   createdAt     DateTime @default(now())
   @@index([proposalId, createdAt])
 }
+
+/// Durable execution/rollback record. Snapshots contain SEO text; keep DB access restricted.
+model RemediationExecution {
+  id            String   @id @default(cuid())
+  proposalId    String   @unique
+  preflightId   String
+  projectId     String
+  field         String
+  originalValue String   @db.Text
+  appliedValue  String   @db.Text
+  snapshotHash  String
+  status        String   @default("pending")
+  errorCode     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  executedAt    DateTime?
+  rolledBackAt  DateTime?
+  @@index([projectId, createdAt])
+  @@index([status])
+}

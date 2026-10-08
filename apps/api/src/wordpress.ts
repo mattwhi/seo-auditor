@@ -158,32 +158,51 @@ export async function wordpressIssueMapping(baseUrl: string, pageUrl: string) {
 }
 
 
-/** v0.8.3 read-only SEO metadata snapshot.
- * WordPress core does not expose Rank Math / Yoast private postmeta through
- * standard REST responses. Never treat missing `meta` as an empty SEO value.
- * A dedicated, authenticated, allowlisted plugin bridge is required for writes.
- */
+/** Authenticated, allowlisted WordPress bridge; never follows redirects. */
+async function bridgeRequest(baseUrl: string, targetType: string, targetId: number, field: string, payload?: { expectedValue: string; newValue: string }): Promise<Response> {
+  const site = wordpressConfig(baseUrl);
+  const connection = wordpressConnection(baseUrl);
+  if (!site || !connection) throw new Error('wordpress_connection_not_configured');
+  if (!['posts', 'pages', 'product'].includes(targetType) || !Number.isSafeInteger(targetId) || targetId < 1) throw new Error('invalid_wordpress_target');
+  if (!['rank_math_title', 'rank_math_description'].includes(field)) throw new Error('unsupported_field');
+  const route = `/wp-json/seo-auditor/v1/meta/${targetType}/${targetId}`;
+  const authorization = `Basic ${Buffer.from(`${connection.username}:${connection.applicationPassword}`).toString('base64')}`;
+  return fetch(`${site}${route}${payload ? '' : `?field=${field}`}`, {
+    method: payload ? 'POST' : 'GET',
+    headers: { authorization, accept: 'application/json', ...(payload ? { 'content-type': 'application/json' } : {}) },
+    body: payload ? JSON.stringify({ field, ...payload }) : undefined,
+    redirect: 'error', signal: AbortSignal.timeout(12_000),
+  });
+}
+export function seoFieldForRule(ruleId: string): string | null {
+  return ruleId.startsWith('description.') ? 'rank_math_description' : ruleId.startsWith('title.') ? 'rank_math_title' : null;
+}
 export async function wordpressSeoSnapshot(baseUrl: string, targetType: string, targetId: number, ruleId: string): Promise<
   { verified: true; adapter: string; field: string; value: string } |
   { verified: false; reason: string }
 > {
-  if (!['posts', 'pages', 'product'].includes(targetType) || !Number.isSafeInteger(targetId) || targetId < 1) {
-    return { verified: false, reason: 'invalid_wordpress_target' };
-  }
-  const field = ruleId.startsWith('description.') ? 'rank_math_description' : ruleId.startsWith('title.') ? 'rank_math_title' : null;
+  const field = seoFieldForRule(ruleId);
   if (!field) return { verified: false, reason: 'unsupported_rule' };
-  const response = await wordpressRead(baseUrl, `/wp-json/wp/v2/${targetType}/${targetId}?context=edit&_fields=id,meta`);
-  if (!response.ok) return { verified: false, reason: `wordpress_read_http_${response.status}` };
+  const response = await bridgeRequest(baseUrl, targetType, targetId, field);
+  if (!response.ok) return { verified: false, reason: response.status === 404 ? 'seo_bridge_not_installed' : `seo_bridge_http_${response.status}` };
   const data: unknown = await response.json();
-  if (!data || typeof data !== 'object') return { verified: false, reason: 'wordpress_invalid_metadata' };
-  const item = data as { id?: unknown; meta?: unknown };
-  if (item.id !== targetId || !item.meta || typeof item.meta !== 'object' || Array.isArray(item.meta)) {
-    return { verified: false, reason: 'seo_metadata_not_exposed' };
+  if (!data || typeof data !== 'object') return { verified: false, reason: 'seo_bridge_invalid_response' };
+  const result = data as { type?: unknown; id?: unknown; field?: unknown; value?: unknown; adapter?: unknown };
+  if (result.type !== targetType || result.id !== targetId || result.field !== field || typeof result.value !== 'string' || result.adapter !== 'rank_math_bridge_v1') {
+    return { verified: false, reason: 'seo_bridge_invalid_response' };
   }
-  const meta = item.meta as Record<string, unknown>;
-  // Own property is required; absent private metadata is not proof of an empty value.
-  if (!Object.prototype.hasOwnProperty.call(meta, field) || typeof meta[field] !== 'string') {
-    return { verified: false, reason: 'seo_metadata_not_exposed' };
+  return { verified: true, adapter: 'rank_math_bridge_v1', field, value: result.value };
+}
+/** Compare-and-swap metadata mutation. Never invoke unless separately authorised. */
+export async function wordpressSeoWrite(baseUrl: string, targetType: string, targetId: number, field: string, expectedValue: string, newValue: string) {
+  const response = await bridgeRequest(baseUrl, targetType, targetId, field, { expectedValue, newValue });
+  if (!response.ok) {
+    if (response.status === 409) throw new Error('wordpress_metadata_conflict');
+    throw new Error(`wordpress_write_http_${response.status}`);
   }
-  return { verified: true, adapter: 'rank_math_rest_readonly', field, value: meta[field] as string };
+  const data: unknown = await response.json();
+  if (!data || typeof data !== 'object') throw new Error('wordpress_write_invalid_response');
+  const result = data as { verified?: unknown; id?: unknown; field?: unknown; value?: unknown };
+  if (result.verified !== true || result.id !== targetId || result.field !== field || result.value !== newValue) throw new Error('wordpress_write_verification_failed');
+  return true;
 }

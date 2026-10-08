@@ -6,7 +6,7 @@ import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
 import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
-import { discoverWordpress, remediationPreview, wordpressConnectionStatus, wordpressIssueMapping, wordpressConfig, wordpressSeoSnapshot } from './wordpress.js';
+import { discoverWordpress, remediationPreview, wordpressConnectionStatus, wordpressIssueMapping, wordpressConfig, wordpressSeoSnapshot, wordpressSeoWrite } from './wordpress.js';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
@@ -139,7 +139,7 @@ app.post('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) =
   } });
   return reply.code(201).send({ ...proposal, executable: false });
 });
-// v0.8.3: operator-only, strictly read-only preflight. No execution route is registered.
+// v0.8.4: operator-only read-only preflight through the Rank Math bridge.
 // An approved proposal is NOT permission to write. The snapshot records a hash of
 // plugin-owned metadata and must be rechecked by a future execution adapter.
 const preflightParams = z.object({ proposalId: z.string().min(1) });
@@ -189,6 +189,106 @@ app.get('/api/v1/wordpress/proposals/:proposalId/preflights', async (req, reply)
   return { executable: false, items: await db.remediationPreflight.findMany({
     where: { proposalId: proposal.id }, orderBy: { createdAt: 'desc' }, take: 50,
   }) };
+});
+// v0.8 completion: explicit, independently gated metadata execution and rollback.
+// Both API and WordPress bridge default to writes disabled. Never expose on public API.
+function executionAuthorized(authorization: string | undefined): boolean {
+  const expected = process.env.REMEDIATION_EXECUTION_TOKEN;
+  if (!expected || expected.length < 48 || !authorization?.startsWith('Bearer ')) return false;
+  const received = Buffer.from(authorization.slice(7), 'utf8');
+  const secret = Buffer.from(expected, 'utf8');
+  return received.length === secret.length && timingSafeEqual(received, secret);
+}
+function writesEnabled(baseUrl: string): boolean {
+  if (process.env.REMEDIATION_WRITES_ENABLED !== 'true') return false;
+  const allowed = (process.env.REMEDIATION_WRITE_ALLOWED_ORIGINS ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+  return allowed.includes(new URL(baseUrl).origin);
+}
+const executionInput = z.object({ preflightId: z.string().min(1), confirm: z.literal('EXECUTE_APPROVED_REMEDIATION') }).strict();
+const rollbackInput = z.object({ confirm: z.literal('ROLLBACK_REMEDIATION') }).strict();
+const snapshotDigest = (targetType: string, targetId: number, field: string, value: string) => createHash('sha256').update(JSON.stringify({ type: targetType, id: targetId, field, value })).digest('hex');
+app.get('/api/v1/wordpress/proposals/:proposalId/execution', async (req, reply) => {
+  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  const parsed = proposalId.safeParse(req.params);
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
+  const record = await db.remediationExecution.findUnique({ where: { proposalId: parsed.data.proposalId } });
+  return record ?? reply.code(404).send({ error: 'execution_not_found' });
+});
+app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) => {
+  if (!executionAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'execution_unauthorized' });
+  const parsed = proposalId.safeParse(req.params);
+  const input = executionInput.safeParse(req.body);
+  if (!parsed.success || !input.success) return reply.code(400).send({ error: 'invalid_execution_request' });
+  const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId } });
+  if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
+  const project = await db.project.findUnique({ where: { id: proposal.projectId } });
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  if (!writesEnabled(project.baseUrl)) return reply.code(403).send({ error: 'execution_disabled' });
+  if (proposal.status !== 'approved') return reply.code(409).send({ error: 'proposal_not_approved' });
+  const preflight = await db.remediationPreflight.findUnique({ where: { id: input.data.preflightId } });
+  if (!preflight || preflight.proposalId !== proposal.id || preflight.conflict) return reply.code(409).send({ error: 'invalid_preflight' });
+  if (Date.now() - preflight.createdAt.getTime() > 15 * 60 * 1000) return reply.code(409).send({ error: 'preflight_expired' });
+  const latest = await db.remediationPreflight.findFirst({ where: { proposalId: proposal.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+  if (latest?.id !== preflight.id) return reply.code(409).send({ error: 'preflight_not_latest' });
+  // A unique execution row and atomic proposal state transition prevent duplicate submissions.
+  const locked = await db.remediationProposal.updateMany({ where: { id: proposal.id, status: 'approved' }, data: { status: 'executing' } });
+  if (!locked.count) return reply.code(409).send({ error: 'proposal_already_processed' });
+  let record: { id: string } | null = null;
+  try {
+    record = await db.remediationExecution.create({ data: {
+      proposalId: proposal.id, preflightId: preflight.id, projectId: proposal.projectId,
+      field: preflight.field, originalValue: preflight.originalValue, appliedValue: proposal.proposedText,
+      snapshotHash: preflight.snapshotHash, status: 'pending',
+    } });
+    const mapping = await wordpressIssueMapping(project.baseUrl, proposal.pageUrl);
+    if (mapping.status !== 'matched' || mapping.matches.length !== 1 || mapping.matches[0]?.type !== proposal.targetType || mapping.matches[0]?.id !== proposal.targetId) throw new Error('wordpress_target_changed');
+    const before = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
+    if (!before.verified || before.field !== preflight.field || snapshotDigest(proposal.targetType, proposal.targetId, before.field, before.value) !== preflight.snapshotHash) throw new Error('wordpress_metadata_conflict');
+    await wordpressSeoWrite(project.baseUrl, proposal.targetType, proposal.targetId, preflight.field, preflight.originalValue, proposal.proposedText);
+    const after = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
+    if (!after.verified || after.value !== proposal.proposedText) throw new Error('wordpress_write_verification_failed');
+    await db.remediationExecution.update({ where: { id: record.id }, data: { status: 'verified', executedAt: new Date() } });
+    await db.remediationProposal.update({ where: { id: proposal.id }, data: { status: 'executed' } });
+    return { status: 'verified', proposalId: proposal.id, executionId: record.id, executable: false, note: 'Write verified; rollback remains available.' };
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'execution_failed';
+    // Fail closed. An ambiguous write failure requires manual reconciliation, never automatic retry.
+    if (record) await db.remediationExecution.update({ where: { id: record.id }, data: { status: 'needs_review', errorCode: code.slice(0, 120) } });
+    await db.remediationProposal.update({ where: { id: proposal.id }, data: { status: 'needs_review' } });
+    req.log.warn({ code }, 'Remediation execution requires review');
+    return reply.code(409).send({ error: 'execution_needs_review', reason: code });
+  }
+});
+app.post('/api/v1/wordpress/proposals/:proposalId/rollback', async (req, reply) => {
+  if (!executionAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'execution_unauthorized' });
+  const parsed = proposalId.safeParse(req.params);
+  const input = rollbackInput.safeParse(req.body);
+  if (!parsed.success || !input.success) return reply.code(400).send({ error: 'invalid_rollback_request' });
+  const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId } });
+  if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
+  const project = await db.project.findUnique({ where: { id: proposal.projectId } });
+  if (!project || !writesEnabled(project.baseUrl)) return reply.code(403).send({ error: 'execution_disabled' });
+  const execution = await db.remediationExecution.findUnique({ where: { proposalId: proposal.id } });
+  if (!execution || execution.status !== 'verified') return reply.code(409).send({ error: 'execution_not_verified' });
+  const locked = await db.remediationExecution.updateMany({ where: { id: execution.id, status: 'verified' }, data: { status: 'rolling_back' } });
+  if (!locked.count) return reply.code(409).send({ error: 'rollback_already_processed' });
+  try {
+    const mapping = await wordpressIssueMapping(project.baseUrl, proposal.pageUrl);
+    if (mapping.status !== 'matched' || mapping.matches.length !== 1 || mapping.matches[0]?.type !== proposal.targetType || mapping.matches[0]?.id !== proposal.targetId) throw new Error('wordpress_target_changed');
+    const before = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
+    if (!before.verified || before.value !== execution.appliedValue || before.field !== execution.field) throw new Error('wordpress_metadata_conflict');
+    await wordpressSeoWrite(project.baseUrl, proposal.targetType, proposal.targetId, execution.field, execution.appliedValue, execution.originalValue);
+    const after = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
+    if (!after.verified || after.value !== execution.originalValue) throw new Error('rollback_verification_failed');
+    await db.remediationExecution.update({ where: { id: execution.id }, data: { status: 'rolled_back', rolledBackAt: new Date() } });
+    await db.remediationProposal.update({ where: { id: proposal.id }, data: { status: 'rolled_back' } });
+    return { status: 'rolled_back', proposalId: proposal.id, executable: false };
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'rollback_failed';
+    await db.remediationExecution.update({ where: { id: execution.id }, data: { status: 'rollback_needs_review', errorCode: code.slice(0, 120) } });
+    req.log.warn({ code }, 'Rollback requires review');
+    return reply.code(409).send({ error: 'rollback_needs_review', reason: code });
+  }
 });
 for (const decision of ['approve', 'reject'] as const) {
   app.post(`/api/v1/wordpress/proposals/:proposalId/${decision}`, async (req, reply) => {
