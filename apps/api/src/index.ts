@@ -75,6 +75,14 @@ app.get('/api/v1/audits/:auditId', async (req, reply) => {
   return a ?? reply.code(404).send({ error: 'audit_not_found' });
 });
 
+// v0.6 performance results: measured independently from the technical SEO score.
+app.get('/api/v1/audits/:auditId/performance', async (req, reply) => {
+  const { auditId } = auditIdParams.parse(req.params);
+  const audit = await db.audit.findUnique({ where: { id: auditId }, select: { id: true } });
+  if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
+  return db.performanceResult.findMany({ where: { auditId }, orderBy: { strategy: 'asc' } });
+});
+
 app.get('/api/v1/audits/:auditId/compare/:baselineAuditId', async (req, reply) => {
   const params = z
     .object({ auditId: z.string().min(1), baselineAuditId: z.string().min(1) })

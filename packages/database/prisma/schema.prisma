@@ -33,6 +33,7 @@ model Audit {
   pages         Page[]
   issues        Issue[]
   crawlFailures CrawlFailure[]
+  performanceResults PerformanceResult[]
 
   @@index([projectId])
   @@index([projectId, createdAt])
@@ -137,4 +138,21 @@ model AuditSchedule {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([enabled, nextRunAt])
+}
+
+// v0.6: Performance data is independent of the technical SEO score.
+model PerformanceResult {
+  id String @id @default(cuid())
+  auditId String
+  strategy String
+  url String
+  status String
+  measuredAt DateTime @default(now())
+  lighthouseScore Int?
+  metrics Json
+  error String?
+
+  audit Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  @@unique([auditId, strategy])
+  @@index([auditId])
 }

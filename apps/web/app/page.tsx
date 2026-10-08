@@ -8,8 +8,9 @@ type RuleSummary = { ruleId: string; severity: string; category: string; count: 
 type Summary = { total: number; bySeverity: Record<string, number>; byCategory: Record<string, number>; byRule: RuleSummary[] };
 type PageRow = { id: string; url: string; finalUrl: string; statusCode: number; title: string | null; crawlDepth: number | null; responseTimeMs: number; _count: { issues: number } };
 type Issue = { id: string; ruleId: string; severity: string; category: string; message: string; evidence: unknown; page: { url: string; finalUrl: string; statusCode: number } | null };
+type PerformanceResult = { id: string; strategy: string; url: string; status: string; lighthouseScore: number | null; measuredAt: string; error: string | null; metrics: { lcp: { value: number | null; displayValue: string | null }; cls: { value: number | null; displayValue: string | null }; fcp: { value: number | null; displayValue: string | null }; tbt: { value: number | null; displayValue: string | null }; speedIndex: { value: number | null; displayValue: string | null }; fieldLcp: number | null; fieldCls: number | null; fieldInp: number | null } };
 type CrawlFailure = { id: string; url: string; type: string; message: string; statusCode: number | null; attempts: number; createdAt: string };
-type View = 'platform' | 'overview' | 'history' | 'issues' | 'pages' | 'failures';
+type View = 'platform' | 'overview' | 'history' | 'issues' | 'pages' | 'failures' | 'performance';
 type ComparedIssue = { fingerprint: string; ruleId: string; severity: string; category: string; message: string; page?: { url: string; finalUrl: string } | null };
 type AuditComparison = { currentAuditId: string; baselineAuditId: string; score: { current: number | null; baseline: number | null; delta: number | null }; pages: { current: number; baseline: number; delta: number; added: string[]; removed: string[] }; issues: { current: number; baseline: number; delta: number; new: ComparedIssue[]; resolved: ComparedIssue[]; persistent: ComparedIssue[]; regressed: ComparedIssue[]; improved: ComparedIssue[] } };
 
@@ -77,6 +78,7 @@ export default function Home() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [pages, setPages] = useState<PageRow[]>([]);
   const [failures, setFailures] = useState<CrawlFailure[]>([]);
+  const [performance, setPerformance] = useState<PerformanceResult[]>([]);
   const [failureTotal, setFailureTotal] = useState(0);
   const [view, setView] = useState<View>('overview');
   const [selectedRule, setSelectedRule] = useState<RuleSummary | null>(null);
@@ -121,13 +123,14 @@ export default function Home() {
 
   const loadAudit = useCallback(async (auditId: string) => {
     if (!auditId) { setAudit(null); return; }
-    const [detail, findingSummary, pageData, failureData] = await Promise.all([
+    const [detail, findingSummary, pageData, failureData, performanceData] = await Promise.all([
       json<Audit>(`${api}/audits/${auditId}`),
       json<Summary>(`${api}/audits/${auditId}/issues/summary`),
       json<{ items: PageRow[] }>(`${api}/audits/${auditId}/pages?limit=500`),
       json<{ items: CrawlFailure[]; total: number }>(`${api}/audits/${auditId}/failures?limit=500`),
+      json<PerformanceResult[]>(`${api}/audits/${auditId}/performance`),
     ]);
-    setAudit(detail); setSummary(findingSummary); setPages(pageData.items); setFailures(failureData.items); setFailureTotal(failureData.total);
+    setAudit(detail); setSummary(findingSummary); setPages(pageData.items); setFailures(failureData.items); setFailureTotal(failureData.total); setPerformance(performanceData);
   }, []);
 
   const loadComparison = useCallback(async (auditId: string, baselineId: string) => {
@@ -210,7 +213,7 @@ export default function Home() {
   function goToIssues(severity?: string) { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSeverity(severity ?? 'all'); setIssueSearch(''); setView('issues'); }
 
   return <main>
-    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.5.0 DEV</div></header>
+    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.6.0 DEV</div></header>
     {error && <div className="alert">{error}</div>}
     <section className="workspace">
       <aside className="sidebar panel">
@@ -222,7 +225,7 @@ export default function Home() {
         <section className="panel hero-panel"><div><span className="eyebrow">SELECTED PROJECT</span><h2>{project?.name ?? 'Create a project to begin'}</h2><p>{project?.baseUrl ?? 'Add a site and launch its first technical SEO audit.'}</p></div><div className="hero-actions"><button className="text-button" disabled={!selectedProject} onClick={() => setView('platform')}>Project dashboard</button><button className="primary start" disabled={!selectedProject || busy} onClick={startAudit}>{busy ? 'Working…' : 'Start new audit'}</button></div></section>
         {audits.length > 0 && <section className="audit-strip"><label>Audit<select value={selectedAudit} onChange={(e) => setSelectedAudit(e.target.value)}>{audits.map((item) => { const status = item.id === selectedAudit && audit ? audit.status : item.status; return <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString()} · {status}</option>; })}</select></label><span className={`status ${audit?.status ?? ''}`}>{audit?.status ?? '—'}</span></section>}
         {audit ? <>
-          <nav className="view-tabs" aria-label="Audit results">{(['platform','overview','history','issues','pages','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
+          <nav className="view-tabs" aria-label="Audit results">{(['platform','overview','history','issues','pages','performance','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
           {view === 'platform' && platform && <section className="comparison-stack">
             <section className="metrics"><article><span>Latest score</span><strong>{platform.latest?.score ?? '—'}</strong></article><article><span>Previous score</span><strong>{platform.previous?.score ?? '—'}</strong></article><article><span>Completed audits</span><strong>{platform.audits.length}</strong></article><article><span>Regression changes</span><strong>{platform.regression ? platform.regression.issues.new.length : 0}</strong><small>new findings</small></article></section>
             {platform.regression && <ComparisonView comparison={platform.regression} />}
@@ -248,6 +251,14 @@ export default function Home() {
           </section>}
           {view === 'issues' && selectedRule && <IssueWorkspace rule={selectedRule} issues={visibleRuleIssues} total={filteredRuleIssues.length} search={issueSearch} setSearch={(value) => { setIssueSearch(value); setUrlPage(0); }} page={urlPage} setPage={setUrlPage} selected={selectedIssue} setSelected={setSelectedIssue} onBack={() => { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSearch(''); }} />}
           {view === 'pages' && <section className="panel"><div className="section-title"><div><span className="eyebrow">PAGES</span><h2>Crawl results</h2><p>Search across requested URL, final URL and page title.</p></div><span>{filteredPages.length} of {pages.length} pages</span></div><div className="filters single"><input placeholder="Search URLs or titles" value={pageSearch} onChange={(e) => { setPageSearch(e.target.value); setIssuePage(0); }} /></div><div className="table-wrap"><table><thead><tr><th>URL</th><th>Status</th><th>Depth</th><th>Response</th><th>Title</th><th>Issues</th></tr></thead><tbody>{visiblePages.map((page) => <tr key={page.id}><td className="url-cell" title={page.url}>{page.url}</td><td><span className={`http ${page.statusCode >= 400 ? 'bad' : page.statusCode >= 300 ? 'warn' : 'good'}`}>{page.statusCode}</span></td><td>{page.crawlDepth ?? '—'}</td><td>{page.responseTimeMs} ms</td><td className="title-cell">{page.title || <em>Missing</em>}</td><td>{page._count.issues}</td></tr>)}</tbody></table></div><Pager page={issuePage} total={filteredPages.length} setPage={setIssuePage} /></section>}
+          {view === 'performance' && <section className="panel">
+            <div className="section-title"><div><span className="eyebrow">V0.6 · PERFORMANCE</span><h2>PageSpeed Insights</h2><p>Mobile and desktop Lighthouse lab measurements, with CrUX real-user field data when available. These results do not change the technical SEO score.</p></div></div>
+            {!performance.length && <p>No performance measurements for this audit. Set PERFORMANCE_ENABLED=true on the worker and run a new audit. A PageSpeed API key is recommended.</p>}
+            <div className="table-wrap"><table><thead><tr><th>Device</th><th>Status</th><th>Lab score</th><th>Lab LCP</th><th>Lab CLS</th><th>Lab FCP</th><th>Lab TBT</th><th>Field LCP (p75)</th><th>Field CLS (p75)</th><th>Field INP (p75)</th></tr></thead><tbody>
+              {performance.map((result) => <tr key={result.id}><td className="capitalize">{result.strategy}</td><td title={result.error ?? ''}>{result.status}{result.error ? ` (${result.error})` : ''}</td><td>{result.lighthouseScore ?? '—'}</td><td>{result.metrics.lcp.displayValue ?? '—'}</td><td>{result.metrics.cls.displayValue ?? '—'}</td><td>{result.metrics.fcp.displayValue ?? '—'}</td><td>{result.metrics.tbt.displayValue ?? '—'}</td><td>{result.metrics.fieldLcp === null ? '—' : `${result.metrics.fieldLcp} ms`}</td><td>{result.metrics.fieldCls ?? '—'}</td><td>{result.metrics.fieldInp === null ? '—' : `${result.metrics.fieldInp} ms`}</td></tr>)}
+            </tbody></table></div>
+            <p>Lab LCP, CLS, FCP and TBT come from Lighthouse. Field LCP, CLS and INP come from CrUX only when Google provides URL-level data. Missing values are shown as —, not zero. Lab INP is not available.</p>
+          </section>}
           {view === 'failures' && <section className="panel"><div className="section-title"><div><span className="eyebrow">CRAWL FAILURES</span><h2>URLs the crawler could not fetch</h2><p>Network, timeout, HTTP and redirect failures are kept separate from SEO findings.</p></div><span>{failureTotal} failures</span></div><div className="table-wrap"><table><thead><tr><th>URL</th><th>Type</th><th>Status</th><th>Attempts</th><th>Message</th></tr></thead><tbody>{failures.map((failure) => <tr key={failure.id}><td className="url-cell" title={failure.url}>{failure.url}</td><td className="capitalize">{failure.type}</td><td>{failure.statusCode ?? '—'}</td><td>{failure.attempts}</td><td className="failure-message">{failure.message}</td></tr>)}{!failures.length && <tr><td colSpan={5} className="empty">No crawl failures recorded for this audit.</td></tr>}</tbody></table></div></section>}
         </> : <section className="panel empty-state"><h2>No audit selected</h2><p>Create or select a project, then start an audit. Progress and findings will appear here.</p></section>}
       </div>

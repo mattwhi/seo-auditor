@@ -1,3 +1,4 @@
+import { measurePageSpeed, failedMeasurement } from './performance.js';
 import { Worker } from 'bullmq';
 
 import { loadConfig } from '@seo-auditor/config';
@@ -33,6 +34,7 @@ new Worker<CrawlJob>(
         db.issue.deleteMany({ where: { auditId: job.data.auditId } }),
         db.page.deleteMany({ where: { auditId: job.data.auditId } }),
         db.crawlFailure.deleteMany({ where: { auditId: job.data.auditId } }),
+        db.performanceResult.deleteMany({ where: { auditId: job.data.auditId } }),
       ]);
       await crawlSite(job.data.startUrl, {
         maxUrls: job.data.maxUrls,
@@ -163,6 +165,27 @@ new Worker<CrawlJob>(
           })),
         });
         findings.push(...advancedFindings);
+      }
+
+      // Opt-in PageSpeed collection; a quota/network error must never fail the SEO crawl.
+      // Lab and field metrics are persisted separately and do not affect technical SEO scoring.
+      if (process.env.PERFORMANCE_ENABLED === 'true') {
+        for (const strategy of ['mobile', 'desktop'] as const) {
+          let result;
+          try {
+            result = await measurePageSpeed(job.data.startUrl, strategy, process.env.PAGESPEED_API_KEY);
+          } catch (error) {
+            result = failedMeasurement(job.data.startUrl, strategy, error);
+          }
+          await db.performanceResult.upsert({
+            where: { auditId_strategy: { auditId: job.data.auditId, strategy } },
+            create: { auditId: job.data.auditId, strategy, url: result.url, status: result.status,
+              measuredAt: new Date(result.measuredAt), lighthouseScore: result.lighthouseScore,
+              metrics: JSON.parse(JSON.stringify(result)), error: result.error },
+            update: { url: result.url, status: result.status, measuredAt: new Date(result.measuredAt),
+              lighthouseScore: result.lighthouseScore, metrics: JSON.parse(JSON.stringify(result)), error: result.error },
+          });
+        }
       }
 
       await db.audit.update({
