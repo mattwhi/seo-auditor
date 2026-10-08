@@ -111,7 +111,7 @@ export function analyzeHtml(input: {
     images: $('img')
       .map((_, element) => ({
         src: $(element).attr('src') ?? '',
-        alt: clean($(element).attr('alt')),
+        alt: $(element).attr('alt') ?? null,
       }))
       .get(),
     links,

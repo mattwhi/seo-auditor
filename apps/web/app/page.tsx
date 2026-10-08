@@ -144,8 +144,16 @@ export default function Home() {
     if (!selectedAudit) return;
     setSelectedRule(rule); setSelectedIssue(null); setIssueSearch(''); setUrlPage(0); setView('issues');
     try {
-      const data = await json<{ items: Issue[] }>(`${api}/audits/${selectedAudit}/issues?ruleId=${encodeURIComponent(rule.ruleId)}&limit=500`);
-      setRuleIssues(data.items);
+      const all: Issue[] = [];
+      const query = `ruleId=${encodeURIComponent(rule.ruleId)}&severity=${encodeURIComponent(rule.severity)}&limit=500`;
+      let offset = 0;
+      while (true) {
+        const data = await json<{ items: Issue[]; total: number }>(`${api}/audits/${selectedAudit}/issues?${query}&offset=${offset}`);
+        all.push(...data.items);
+        offset += data.items.length;
+        if (!data.items.length || offset >= data.total) break;
+      }
+      setRuleIssues(all);
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to load affected URLs'); }
   }, [selectedAudit]);
 
@@ -277,7 +285,7 @@ function Pager({ page, total, setPage }: { page: number; total: number; setPage:
 function EvidenceDetails({ evidence }: { evidence: unknown }) {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return <pre>{JSON.stringify(evidence ?? {}, null, 2)}</pre>;
   const entries = Object.entries(evidence as Record<string, unknown>);
-  return <div className="evidence-fields">{entries.map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, ' $1')}</strong>{Array.isArray(value) ? <div className="evidence-list">{value.map((item, index) => <div key={index}>{String(item)}</div>)}</div> : <span>{value === null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value)}</span>}</div>)}</div>;
+  return <div className="evidence-fields">{entries.map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, ' $1')}</strong>{Array.isArray(value) ? <div className="evidence-list">{value.map((item, index) => <div key={index}>{item && typeof item === 'object' ? <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',margin:0}}>{JSON.stringify(item, null, 2)}</pre> : String(item)}</div>)}</div> : <span>{value === null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value)}</span>}</div>)}</div>;
 }
 
 function IssueWorkspace({ rule, issues, total, search, setSearch, page, setPage, selected, setSelected, onBack }: { rule: RuleSummary; issues: Issue[]; total: number; search: string; setSearch: (value: string) => void; page: number; setPage: (page: number) => void; selected: Issue | null; setSelected: (issue: Issue | null) => void; onBack: () => void }) {

@@ -42,7 +42,17 @@ const isNoindex = (page: PageFacts): boolean =>
   hasDirective(page.robots, 'noindex') || hasDirective(page.xRobotsTag, 'noindex');
 
 const isIndexableHtmlCandidate = (page: PageFacts): boolean =>
-  isHtmlSuccess(page) && !isNoindex(page);
+  isHtmlSuccess(page) && !isNoindex(page) && (() => {
+    if (!page.canonical) return true;
+    try {
+      const canonical = new URL(page.canonical, page.finalUrl);
+      const current = new URL(page.finalUrl);
+      const normalize = (url: URL) => `${url.origin}${url.pathname.replace(/\/$/, '')}${url.search}`;
+      return normalize(canonical) === normalize(current);
+    } catch {
+      return true; // Invalid canonical is reported by the dedicated canonical rule.
+    }
+  })();
 
 export const coreRules: readonly SeoRule[] = Object.freeze([
   {
@@ -227,7 +237,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     category: 'headings',
     evaluate(page) {
       return isIndexableHtmlCandidate(page) && page.h1.length > 1
-        ? [finding(this, { evidence: { count: page.h1.length } })]
+        ? [finding(this, { evidence: { count: page.h1.length, headings: page.h1.map((text, index) => ({ position: index + 1, text })) } })]
         : [];
     },
   },
@@ -317,8 +327,10 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     category: 'images',
     remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce'], action: 'seo:update_alt' },
     evaluate(page) {
-      const count = page.images.filter((image) => !image.alt).length;
-      return count ? [finding(this, { evidence: { count } })] : [];
+      const missing = page.images.flatMap((image, index) => image.alt === null
+        ? [{ position: index + 1, src: image.src, altState: 'missing-attribute' }]
+        : []);
+      return missing.length ? [finding(this, { evidence: { count: missing.length, images: missing } })] : [];
     },
   },
 ]);

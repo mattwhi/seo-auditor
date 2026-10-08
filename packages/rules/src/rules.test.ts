@@ -49,8 +49,10 @@ test('core findings carry deterministic evidence', () => {
 
   assert.deepEqual(findings.find((item) => item.ruleId === 'heading.h1-multiple')?.evidence, {
     count: 2,
+    headings: [{ position: 1, text: 'One' }, { position: 2, text: 'Two' }],
   });
   assert.deepEqual(findings.find((item) => item.ruleId === 'image.alt-missing')?.evidence, {
-    count: 2,
+    count: 1,
+    images: [{ position: 1, src: '/one.jpg', altState: 'missing-attribute' }],
   });
 });
