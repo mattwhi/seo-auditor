@@ -6,3 +6,7 @@ test('excludes Cloudflare email obfuscation endpoint, not normal pages', () => {
   assert.equal(isNonContentUtilityUrl('https://example.com/cdn-cgi/l/email-protection/'), true);
   assert.equal(isNonContentUtilityUrl('https://example.com/contact'), false);
 });
+
+test('legacy email protection utility route is excluded', () => {
+  assert.equal(isNonContentUtilityUrl('https://example.com/email-protection/'), true);
+});

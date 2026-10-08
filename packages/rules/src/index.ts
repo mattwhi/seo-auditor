@@ -41,8 +41,13 @@ const isHtmlSuccess = (page: PageFacts): boolean =>
 const isNoindex = (page: PageFacts): boolean =>
   hasDirective(page.robots, 'noindex') || hasDirective(page.xRobotsTag, 'noindex');
 
+const isNonContentUtilityPage = (url: string): boolean => {
+  try { return new URL(url).pathname.replace(/\/$/, '') === '/cdn-cgi/l/email-protection' || new URL(url).pathname.replace(/\/$/, '') === '/email-protection'; }
+  catch { return false; }
+};
+
 const isIndexableHtmlCandidate = (page: PageFacts): boolean =>
-  isHtmlSuccess(page) && !isNoindex(page) && (() => {
+  !isNonContentUtilityPage(page.finalUrl) && isHtmlSuccess(page) && !isNoindex(page) && (() => {
     if (!page.canonical) return true;
     try {
       const canonical = new URL(page.canonical, page.finalUrl);
@@ -327,6 +332,7 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     category: 'images',
     remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce'], action: 'seo:update_alt' },
     evaluate(page) {
+      if (!isIndexableHtmlCandidate(page)) return [];
       const missing = page.images.flatMap((image, index) => image.alt === null
         ? [{ position: index + 1, src: image.src, altState: 'missing-attribute' }]
         : []);

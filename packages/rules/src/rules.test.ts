@@ -56,3 +56,10 @@ test('core findings carry deterministic evidence', () => {
     images: [{ position: 1, src: '/one.jpg', altState: 'missing-attribute' }],
   });
 });
+
+test('intentional empty alt is not missing, and utility pages do not trigger content rules', () => {
+  const decorative = evaluatePage({ ...page, images: [{ src: '/decorative.svg', alt: '' }] });
+  assert.equal(decorative.some((item) => item.ruleId === 'image.alt-missing'), false);
+  const utility = evaluatePage({ ...page, finalUrl: 'https://example.test/email-protection/' });
+  assert.equal(utility.some((item) => item.ruleId === 'image.alt-missing' || item.ruleId === 'heading.h1-missing'), false);
+});

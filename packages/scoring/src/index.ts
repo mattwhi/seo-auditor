@@ -17,17 +17,18 @@ const maxPenalty: Record<Severity, number> = {
 export const score = (findings: RuleFinding[], pageCount: number): number => {
   if (pageCount <= 0) return 100;
 
-  const countsByRule = new Map<string, { severity: Severity; count: number }>();
+  const countsByRule = new Map<string, number>();
 
   for (const finding of findings) {
-    const current = countsByRule.get(finding.ruleId);
-    if (current) current.count += 1;
-    else countsByRule.set(finding.ruleId, { severity: finding.severity, count: 1 });
+    if (finding.severity === 'info') continue;
+    const key = `${finding.ruleId}:${finding.severity}`;
+    countsByRule.set(key, (countsByRule.get(key) ?? 0) + 1);
   }
 
-  const penalty = Array.from(countsByRule.values()).reduce((total, item) => {
-    const prevalence = Math.min(1, item.count / pageCount);
-    return total + maxPenalty[item.severity] * prevalence;
+  const penalty = Array.from(countsByRule.entries()).reduce((total, [key, count]) => {
+    const severity = key.slice(key.lastIndexOf(':') + 1) as Severity;
+    const prevalence = Math.min(1, count / pageCount);
+    return total + maxPenalty[severity] * prevalence;
   }, 0);
 
   return Math.max(0, Math.min(100, Math.round(100 - penalty)));

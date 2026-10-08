@@ -285,7 +285,14 @@ function Pager({ page, total, setPage }: { page: number; total: number; setPage:
 function EvidenceDetails({ evidence }: { evidence: unknown }) {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return <pre>{JSON.stringify(evidence ?? {}, null, 2)}</pre>;
   const entries = Object.entries(evidence as Record<string, unknown>);
-  return <div className="evidence-fields">{entries.map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, ' $1')}</strong>{Array.isArray(value) ? <div className="evidence-list">{value.map((item, index) => <div key={index}>{item && typeof item === 'object' ? <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',margin:0}}>{JSON.stringify(item, null, 2)}</pre> : String(item)}</div>)}</div> : <span>{value === null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value)}</span>}</div>)}</div>;
+  const label = (value: string) => value.replace(/([A-Z])/g, ' $1').replace(/^./, (first) => first.toUpperCase());
+  return <div className="evidence-fields">{entries.map(([key, value]) => <div key={key}>
+    <strong>{label(key)}</strong>
+    {Array.isArray(value) ? value.length === 0 ? <span>None</span> : value.every((item) => item && typeof item === 'object' && !Array.isArray(item))
+      ? <div className="table-wrap"><table><thead><tr>{Array.from(new Set(value.flatMap((item) => Object.keys(item as Record<string, unknown>)))).map((column) => <th key={column}>{label(column)}</th>)}</tr></thead><tbody>{value.map((item, index) => <tr key={index}>{Array.from(new Set(value.flatMap((entry) => Object.keys(entry as Record<string, unknown>)))).map((column) => <td key={column} style={{overflowWrap:'anywhere',whiteSpace:'normal'}}>{String((item as Record<string, unknown>)[column] ?? '—')}</td>)}</tr>)}</tbody></table></div>
+      : <div className="evidence-list">{value.map((item, index) => <div key={index} style={{overflowWrap:'anywhere'}}>{String(item)}</div>)}</div>
+      : <span style={{overflowWrap:'anywhere'}}>{value === null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value)}</span>}
+  </div>)}</div>;
 }
 
 function IssueWorkspace({ rule, issues, total, search, setSearch, page, setPage, selected, setSelected, onBack }: { rule: RuleSummary; issues: Issue[]; total: number; search: string; setSearch: (value: string) => void; page: number; setPage: (page: number) => void; selected: Issue | null; setSelected: (issue: Issue | null) => void; onBack: () => void }) {

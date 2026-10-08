@@ -94,7 +94,7 @@ const htmlSuccess = (p: AuditPageFacts) =>
   (p.contentType ?? '').toLowerCase().includes('text/html');
 const normalized = (value: string) => value.trim().replace(/\/$/, '').toLowerCase();
 const isUtilityLink = (href: string): boolean => {
-  try { return new URL(href).pathname.replace(/\/$/, '') === '/cdn-cgi/l/email-protection'; } catch { return false; }
+  try { return ['/cdn-cgi/l/email-protection', '/email-protection'].includes(new URL(href).pathname.replace(/\/$/, '')); } catch { return false; }
 };
 const issue = (
   pageId: string | null,
@@ -118,7 +118,7 @@ export function evaluateAudit(
 
   // A duplicate is actionable only when at least two independently indexable URLs compete.
   const preferred = (page: AuditPageFacts): boolean => {
-    if (!htmlSuccess(page)) return false;
+    if (!htmlSuccess(page) || isUtilityLink(page.finalUrl)) return false;
     const directives = [...page.robots, ...page.xRobotsTag].join(',').toLowerCase();
     if (/(^|[,\s])noindex([,\s]|$)/.test(directives)) return false;
     if (!page.canonical) return true; // Unknown canonical state: retain the URL.
