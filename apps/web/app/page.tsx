@@ -11,7 +11,10 @@ type Issue = { id: string; ruleId: string; severity: string; category: string; m
 type PerformanceResult = { id: string; pageType: string; strategy: string; url: string; status: string; lighthouseScore: number | null; measuredAt: string; error: string | null; metrics: { diagnostics?: Array<{ id: string; title: string; description: string | null; displayValue: string | null; score: number | null; savingsMs: number | null; element: string | null; resources?: Array<{ url: string | null; transferSize: number | null; totalBytes: number | null; wastedBytes: number | null; wastedMs: number | null; element: string | null }> }>; context?: { lighthouseVersion: string | null; fetchTime: string | null; requestedUrl: string; finalUrl: string | null }; fieldSource?: string; lcp: { value: number | null; displayValue: string | null }; cls: { value: number | null; displayValue: string | null }; fcp: { value: number | null; displayValue: string | null }; tbt: { value: number | null; displayValue: string | null }; speedIndex: { value: number | null; displayValue: string | null }; fieldLcp: number | null; fieldCls: number | null; fieldInp: number | null } };
 type CrawlFailure = { id: string; url: string; type: string; message: string; statusCode: number | null; attempts: number; createdAt: string };
 type PerformanceHistory = { auditId: string; createdAt: string; results: Array<{ url: string; pageType: string; strategy: string; lighthouseScore: number | null; status: string }> };
-type View = 'platform' | 'overview' | 'history' | 'issues' | 'pages' | 'failures' | 'performance';
+type View = 'platform' | 'overview' | 'history' | 'issues' | 'pages' | 'failures' | 'performance' | 'google';
+type GoogleStatus = { enabled: boolean; credentialsConfigured: boolean; searchConsoleConfigured: boolean; analyticsConfigured: boolean };
+type GscReport = { pages: Array<{ page: string; clicks: number; impressions: number; ctr: number; position: number }>; totals: { clicks: number; impressions: number }; note: string };
+type GaReport = { pages: Array<{ page: string; sessions: number; users: number; engagedSessions: number }>; note: string };
 type ComparedIssue = { fingerprint: string; ruleId: string; severity: string; category: string; message: string; page?: { url: string; finalUrl: string } | null };
 type AuditComparison = { currentAuditId: string; baselineAuditId: string; score: { current: number | null; baseline: number | null; delta: number | null }; pages: { current: number; baseline: number; delta: number; added: string[]; removed: string[] }; issues: { current: number; baseline: number; delta: number; new: ComparedIssue[]; resolved: ComparedIssue[]; persistent: ComparedIssue[]; regressed: ComparedIssue[]; improved: ComparedIssue[] } };
 
@@ -81,6 +84,11 @@ export default function Home() {
   const [failures, setFailures] = useState<CrawlFailure[]>([]);
   const [performance, setPerformance] = useState<PerformanceResult[]>([]);
   const [performanceHistory, setPerformanceHistory] = useState<PerformanceHistory[]>([]);
+  const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
+  const [gscReport, setGscReport] = useState<GscReport | null>(null);
+  const [gaReport, setGaReport] = useState<GaReport | null>(null);
+  const [googleError, setGoogleError] = useState('');
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [failureTotal, setFailureTotal] = useState(0);
   const [view, setView] = useState<View>('overview');
   const [selectedRule, setSelectedRule] = useState<RuleSummary | null>(null);
@@ -213,10 +221,32 @@ export default function Home() {
   const filteredPages = useMemo(() => pages.filter((page) => !pageSearch || page.url.toLowerCase().includes(pageSearch.toLowerCase()) || page.finalUrl.toLowerCase().includes(pageSearch.toLowerCase()) || (page.title ?? '').toLowerCase().includes(pageSearch.toLowerCase())), [pages, pageSearch]);
   const visiblePages = filteredPages.slice(issuePage * PAGE_SIZE, (issuePage + 1) * PAGE_SIZE);
 
+  async function loadGoogleReports() {
+    if (!selectedProject) return;
+    setGoogleBusy(true); setGoogleError(''); setGscReport(null); setGaReport(null);
+    try {
+      const status = await json<GoogleStatus>(`${api}/projects/${selectedProject}/google/status`);
+      setGoogleStatus(status);
+      if (!status.enabled || !status.credentialsConfigured) return;
+      const end = new Date(); end.setUTCDate(end.getUTCDate() - 3);
+      const start = new Date(end); start.setUTCDate(start.getUTCDate() - 27);
+      const dates = `startDate=${start.toISOString().slice(0,10)}&endDate=${end.toISOString().slice(0,10)}`;
+      const [gsc, ga] = await Promise.allSettled([
+        status.searchConsoleConfigured ? json<GscReport>(`${api}/projects/${selectedProject}/google/search-console?${dates}`) : Promise.resolve(null),
+        status.analyticsConfigured ? json<GaReport>(`${api}/projects/${selectedProject}/google/analytics?${dates}`) : Promise.resolve(null),
+      ]);
+      if (gsc.status === 'fulfilled') setGscReport(gsc.value);
+      if (ga.status === 'fulfilled') setGaReport(ga.value);
+      const failures = [gsc, ga].filter((r) => r.status === 'rejected');
+      if (failures.length) setGoogleError('One or more Google reports could not be loaded. Check service account permissions and API configuration.');
+    } catch { setGoogleError('Could not retrieve Google integration status.'); }
+    finally { setGoogleBusy(false); }
+  }
+
   function goToIssues(severity?: string) { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSeverity(severity ?? 'all'); setIssueSearch(''); setView('issues'); }
 
   return <main>
-    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.6.0 DEV</div></header>
+    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.7.0 DEV</div></header>
     {error && <div className="alert">{error}</div>}
     <section className="workspace">
       <aside className="sidebar panel">
@@ -228,7 +258,7 @@ export default function Home() {
         <section className="panel hero-panel"><div><span className="eyebrow">SELECTED PROJECT</span><h2>{project?.name ?? 'Create a project to begin'}</h2><p>{project?.baseUrl ?? 'Add a site and launch its first technical SEO audit.'}</p></div><div className="hero-actions"><button className="text-button" disabled={!selectedProject} onClick={() => setView('platform')}>Project dashboard</button><button className="primary start" disabled={!selectedProject || busy} onClick={startAudit}>{busy ? 'Working…' : 'Start new audit'}</button></div></section>
         {audits.length > 0 && <section className="audit-strip"><label>Audit<select value={selectedAudit} onChange={(e) => setSelectedAudit(e.target.value)}>{audits.map((item) => { const status = item.id === selectedAudit && audit ? audit.status : item.status; return <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString()} · {status}</option>; })}</select></label><span className={`status ${audit?.status ?? ''}`}>{audit?.status ?? '—'}</span></section>}
         {audit ? <>
-          <nav className="view-tabs" aria-label="Audit results">{(['platform','overview','history','issues','pages','performance','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
+          <nav className="view-tabs" aria-label="Audit results">{(['platform','overview','history','issues','pages','performance','google','failures'] as View[]).map((item) => <button key={item} className={view === item ? 'view-tab active' : 'view-tab'} onClick={() => { setView(item); if (item === 'issues') setSelectedRule(null); if (item === 'google') void loadGoogleReports(); }}>{item === 'failures' ? 'Crawl failures' : item}{item === 'issues' && <span>{summary?.byRule.length ?? 0}</span>}{item === 'pages' && <span>{audit._count?.pages ?? pages.length}</span>}{item === 'failures' && <span>{failureTotal}</span>}</button>)}</nav>
           {view === 'platform' && platform && <section className="comparison-stack">
             <section className="metrics"><article><span>Latest score</span><strong>{platform.latest?.score ?? '—'}</strong></article><article><span>Previous score</span><strong>{platform.previous?.score ?? '—'}</strong></article><article><span>Completed audits</span><strong>{platform.audits.length}</strong></article><article><span>Regression changes</span><strong>{platform.regression ? platform.regression.issues.new.length : 0}</strong><small>new findings</small></article></section>
             {platform.regression && <ComparisonView comparison={platform.regression} />}
@@ -254,6 +284,19 @@ export default function Home() {
           </section>}
           {view === 'issues' && selectedRule && <IssueWorkspace rule={selectedRule} issues={visibleRuleIssues} total={filteredRuleIssues.length} search={issueSearch} setSearch={(value) => { setIssueSearch(value); setUrlPage(0); }} page={urlPage} setPage={setUrlPage} selected={selectedIssue} setSelected={setSelectedIssue} onBack={() => { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSearch(''); }} />}
           {view === 'pages' && <section className="panel"><div className="section-title"><div><span className="eyebrow">PAGES</span><h2>Crawl results</h2><p>Search across requested URL, final URL and page title.</p></div><span>{filteredPages.length} of {pages.length} pages</span></div><div className="filters single"><input placeholder="Search URLs or titles" value={pageSearch} onChange={(e) => { setPageSearch(e.target.value); setIssuePage(0); }} /></div><div className="table-wrap"><table><thead><tr><th>URL</th><th>Status</th><th>Depth</th><th>Response</th><th>Title</th><th>Issues</th></tr></thead><tbody>{visiblePages.map((page) => <tr key={page.id}><td className="url-cell" title={page.url}>{page.url}</td><td><span className={`http ${page.statusCode >= 400 ? 'bad' : page.statusCode >= 300 ? 'warn' : 'good'}`}>{page.statusCode}</span></td><td>{page.crawlDepth ?? '—'}</td><td>{page.responseTimeMs} ms</td><td className="title-cell">{page.title || <em>Missing</em>}</td><td>{page._count.issues}</td></tr>)}</tbody></table></div><Pager page={issuePage} total={filteredPages.length} setPage={setIssuePage} /></section>}
+          {view === 'google' && <section className="panel">
+            <div className="section-title"><div><span className="eyebrow">v0.7 · GOOGLE INTEGRATIONS</span><h2>Search Console &amp; Analytics</h2><p>Read-only Google reports. Last 28 complete days, ending three days ago. Separate from the SEO score.</p></div><button onClick={() => void loadGoogleReports()} disabled={googleBusy}>{googleBusy ? 'Loading…' : 'Refresh'}</button></div>
+            {googleError && <p role="alert">{googleError}</p>}
+            {!googleStatus?.enabled && <p>Google integrations are disabled. Configure GOOGLE_INTEGRATIONS_ENABLED on the API service.</p>}
+            {googleStatus?.enabled && !googleStatus.credentialsConfigured && <p>Google service account credentials are not configured on the API service.</p>}
+            {googleStatus?.enabled && googleStatus.credentialsConfigured && <>
+              <p>Search Console: {googleStatus.searchConsoleConfigured ? 'Configured' : 'Not mapped'} · GA4: {googleStatus.analyticsConfigured ? 'Configured' : 'Not mapped'}</p>
+              <h3>Search Console · top pages</h3>
+              {gscReport ? <><p>{gscReport.totals.clicks} clicks · {gscReport.totals.impressions} impressions (returned rows)</p><div className="table-wrap"><table><thead><tr><th>Page</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg position</th></tr></thead><tbody>{gscReport.pages.map((r) => <tr key={r.page}><td className="url-cell">{r.page}</td><td>{r.clicks}</td><td>{r.impressions}</td><td>{(r.ctr*100).toFixed(1)}%</td><td>{r.position.toFixed(1)}</td></tr>)}</tbody></table></div><p>{gscReport.note}</p></> : <p>No Search Console report loaded.</p>}
+              <h3>GA4 · landing pages (all channels)</h3>
+              {gaReport ? <><div className="table-wrap"><table><thead><tr><th>Landing page</th><th>Sessions</th><th>Users</th><th>Engaged sessions</th></tr></thead><tbody>{gaReport.pages.map((r) => <tr key={r.page}><td className="url-cell">{r.page}</td><td>{r.sessions}</td><td>{r.users}</td><td>{r.engagedSessions}</td></tr>)}</tbody></table></div><p>{gaReport.note}</p></> : <p>No GA4 report loaded.</p>}
+            </>}
+          </section>}
           {view === 'performance' && <section className="panel">
             <div className="section-title"><div><span className="eyebrow">V0.6 · PERFORMANCE</span><h2>PageSpeed Insights</h2><p>Representative page sampling · mobile and desktop Lighthouse lab data · CrUX field data where available. Independent of technical SEO score.</p></div></div>
             {!performance.length && <p>No performance measurements for this audit. Enable PERFORMANCE_ENABLED=true on the worker and run a new audit.</p>}

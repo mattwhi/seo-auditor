@@ -4,6 +4,7 @@ import { db } from '@seo-auditor/database';
 import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
+import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
@@ -19,6 +20,31 @@ app.get('/ready', async (_req, reply) => {
     return reply.code(503).send({ status: 'not-ready' });
   }
 });
+// Google reports are read-only and explicitly disabled unless configured server-side.
+// Do not expose this API publicly without authentication and access controls.
+const googleDates = z.object({ startDate: z.iso.date(), endDate: z.iso.date() }).refine((v) => v.startDate <= v.endDate && (Date.parse(v.endDate) - Date.parse(v.startDate)) <= 366 * 24 * 60 * 60 * 1000, { message: 'invalid_date_range' });
+async function googleProject(projectId: string) { return db.project.findUnique({ where: { id: projectId }, select: { baseUrl: true } }); }
+app.get('/api/v1/projects/:projectId/google/status', async (req, reply) => {
+  const { projectId } = z.object({ projectId: z.string() }).parse(req.params);
+  const project = await googleProject(projectId);
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  try { return googleStatus(project.baseUrl); } catch { return reply.code(500).send({ error: 'google_configuration_invalid' }); }
+});
+for (const [kind, reporter] of [['search-console', searchConsoleReport], ['analytics', analyticsReport]] as const) {
+  app.get(`/api/v1/projects/:projectId/google/${kind}`, async (req, reply) => {
+    const { projectId } = z.object({ projectId: z.string() }).parse(req.params);
+    const dates = googleDates.safeParse(req.query);
+    if (!dates.success) return reply.code(400).send({ error: 'invalid_date_range' });
+    const project = await googleProject(projectId);
+    if (!project) return reply.code(404).send({ error: 'project_not_found' });
+    try { return await reporter(project.baseUrl, dates.data.startDate, dates.data.endDate); }
+    catch (error) {
+      const code = error instanceof Error ? error.message : 'google_request_failed';
+      req.log.warn({ code, kind }, 'Google integration request failed');
+      return reply.code(code.includes('not_configured') || code.includes('disabled') ? 409 : 502).send({ error: code });
+    }
+  });
+}
 app.post('/api/v1/projects', async (req, reply) => {
   const x = z.object({ name: z.string().min(1), baseUrl: z.string().url() }).safeParse(req.body);
   if (!x.success) return reply.code(400).send({ error: x.error.flatten() });

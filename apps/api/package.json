@@ -1,13 +1,13 @@
 {
   "name": "@seo-auditor/api",
-  "version": "0.6.0-dev.0",
+  "version": "0.7.0-dev.0",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test",
+    "test": "tsc -p tsconfig.json && node --test tests/*.test.mjs",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

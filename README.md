@@ -274,3 +274,8 @@ The v0.4 release candidate adds continuous audit-platform capabilities on top of
 ## v0.5 Advanced Technical SEO (development)
 
 The v0.5 development line expands audit-wide deterministic analysis while keeping crawling and remediation separated. Rules can now describe future remediation support, risk, approval mode, supported platforms and a restricted action identifier. This metadata does not grant write access: external modification remains deferred to the v0.7 connection framework and v0.8 platform packs. The long-term workflow is Crawl → Understand → Recommend → Fix → Verify → Monitor.
+
+
+## v0.7 Google integrations
+
+Read-only Search Console and GA4 Data API reporting is available via the **Google** tab. See [configuration and security guidance](docs/V07-GOOGLE-INTEGRATIONS.md). Keep the unauthenticated API private.
