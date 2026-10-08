@@ -65,6 +65,9 @@ services:
       DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
       REDIS_URL: redis://redis:6379
       SERVICE_NAME: worker
+      PERFORMANCE_ENABLED: ${PERFORMANCE_ENABLED:-false}
+      PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
+      PERFORMANCE_MAX_PAGES: ${PERFORMANCE_MAX_PAGES:-4}
     command: ['pnpm', '--filter', '@seo-auditor/worker', 'start']
     depends_on:
       migrate:

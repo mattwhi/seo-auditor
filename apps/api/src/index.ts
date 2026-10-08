@@ -36,6 +36,14 @@ app.get('/api/v1/projects/:projectId/audits', async (req, reply) => {
     take: 25,
   });
 });
+// Performance history is intentionally independent from the SEO score.
+app.get('/api/v1/projects/:projectId/performance-history', async (req, reply) => {
+  const { projectId } = z.object({ projectId: z.string().min(1) }).parse(req.params);
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  const audits = await db.audit.findMany({ where: { projectId, status: 'completed' }, orderBy: { createdAt: 'desc' }, take: 25, select: { id: true, createdAt: true, performanceResults: { select: { url: true, pageType: true, strategy: true, lighthouseScore: true, status: true } } } });
+  return audits.map((audit) => ({ auditId: audit.id, createdAt: audit.createdAt, results: audit.performanceResults }));
+});
 app.post('/api/v1/projects/:projectId/audits', async (req, reply) => {
   const p = z.object({ projectId: z.string() }).parse(req.params);
   const project = await db.project.findUnique({ where: { id: p.projectId } });
@@ -80,7 +88,7 @@ app.get('/api/v1/audits/:auditId/performance', async (req, reply) => {
   const { auditId } = auditIdParams.parse(req.params);
   const audit = await db.audit.findUnique({ where: { id: auditId }, select: { id: true } });
   if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
-  return db.performanceResult.findMany({ where: { auditId }, orderBy: { strategy: 'asc' } });
+  return db.performanceResult.findMany({ where: { auditId }, orderBy: [{ pageType: 'asc' }, { strategy: 'asc' }] });
 });
 
 app.get('/api/v1/audits/:auditId/compare/:baselineAuditId', async (req, reply) => {

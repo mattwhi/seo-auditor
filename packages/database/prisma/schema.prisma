@@ -145,6 +145,7 @@ model PerformanceResult {
   id String @id @default(cuid())
   auditId String
   strategy String
+  pageType String @default("homepage")
   url String
   status String
   measuredAt DateTime @default(now())
@@ -153,6 +154,6 @@ model PerformanceResult {
   error String?
 
   audit Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
-  @@unique([auditId, strategy])
+  @@unique([auditId, strategy, url])
   @@index([auditId])
 }

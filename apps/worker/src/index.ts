@@ -1,4 +1,4 @@
-import { measurePageSpeed, failedMeasurement } from './performance.js';
+import { measurePageSpeed, failedMeasurement, selectPerformanceTargets } from './performance.js';
 import { Worker } from 'bullmq';
 
 import { loadConfig } from '@seo-auditor/config';
@@ -167,24 +167,28 @@ new Worker<CrawlJob>(
         findings.push(...advancedFindings);
       }
 
-      // Opt-in PageSpeed collection; a quota/network error must never fail the SEO crawl.
-      // Lab and field metrics are persisted separately and do not affect technical SEO scoring.
+      // Representative deterministic sampling: homepage, category, product, article.
+      // Failures are persisted per target and never fail the technical SEO audit.
       if (process.env.PERFORMANCE_ENABLED === 'true') {
-        for (const strategy of ['mobile', 'desktop'] as const) {
-          let result;
-          try {
-            result = await measurePageSpeed(job.data.startUrl, strategy, process.env.PAGESPEED_API_KEY);
-          } catch (error) {
-            result = failedMeasurement(job.data.startUrl, strategy, error);
+        const maxPages = Math.min(4, Math.max(1, Number(process.env.PERFORMANCE_MAX_PAGES || '4') || 4));
+        const targets = selectPerformanceTargets(job.data.startUrl, persistedPages, maxPages);
+        for (const target of targets) {
+          for (const strategy of ['mobile', 'desktop'] as const) {
+            let result;
+            try {
+              result = await measurePageSpeed(target.url, strategy, process.env.PAGESPEED_API_KEY);
+            } catch (error) {
+              result = failedMeasurement(target.url, strategy, error);
+            }
+            await db.performanceResult.upsert({
+              where: { auditId_strategy_url: { auditId: job.data.auditId, strategy, url: target.url } },
+              create: { auditId: job.data.auditId, strategy, pageType: target.pageType, url: target.url, status: result.status,
+                measuredAt: new Date(result.measuredAt), lighthouseScore: result.lighthouseScore,
+                metrics: JSON.parse(JSON.stringify(result)), error: result.error },
+              update: { pageType: target.pageType, status: result.status, measuredAt: new Date(result.measuredAt),
+                lighthouseScore: result.lighthouseScore, metrics: JSON.parse(JSON.stringify(result)), error: result.error },
+            });
           }
-          await db.performanceResult.upsert({
-            where: { auditId_strategy: { auditId: job.data.auditId, strategy } },
-            create: { auditId: job.data.auditId, strategy, url: result.url, status: result.status,
-              measuredAt: new Date(result.measuredAt), lighthouseScore: result.lighthouseScore,
-              metrics: JSON.parse(JSON.stringify(result)), error: result.error },
-            update: { url: result.url, status: result.status, measuredAt: new Date(result.measuredAt),
-              lighthouseScore: result.lighthouseScore, metrics: JSON.parse(JSON.stringify(result)), error: result.error },
-          });
         }
       }
 
