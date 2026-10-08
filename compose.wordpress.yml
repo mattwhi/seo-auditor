@@ -1,0 +1,11 @@
+# Add after compose.vm.yml and compose.google.yml in production deployment.
+# Credentials remain in a root-owned 0600 host file, never in .env or Git.
+services:
+  api:
+    environment:
+      WORDPRESS_CONNECTIONS_FILE: /run/secrets/wordpress-connections.json
+    volumes:
+      - type: bind
+        source: /opt/seo-auditor/secrets/wordpress-connections.json
+        target: /run/secrets/wordpress-connections.json
+        read_only: true

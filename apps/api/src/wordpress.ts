@@ -2,6 +2,7 @@
  * Deliberately no write endpoints: API has no user authentication yet.
  */
 import { z } from 'zod';
+import { readFileSync } from 'node:fs';
 
 const mappingSchema = z.record(z.string(), z.object({ siteUrl: z.string().url(), enabled: z.boolean().default(false) }));
 export function wordpressConfig(baseUrl: string) {
@@ -59,4 +60,99 @@ export function remediationPreview(ruleId: string, pageUrl: string, baseUrl: str
     status: 'draft', executable: false, requiresApproval: true,
     note: 'Preview only. No WordPress credentials are collected and no changes are applied in v0.8 foundation.',
   };
+}
+
+
+/** v0.8.1: private, file-backed WordPress Application Password connection.
+ * The API does not have operator authentication: these endpoints are strictly
+ * read-only and return no WordPress account details or secret material.
+ */
+const connectionSchema = z.record(z.string(), z.object({
+  username: z.string().min(1), applicationPassword: z.string().min(1),
+}));
+
+type WordPressConnection = { username: string; applicationPassword: string };
+export function wordpressConnection(baseUrl: string): WordPressConnection | null {
+  const siteUrl = wordpressConfig(baseUrl);
+  if (!siteUrl) return null;
+  const file = process.env.WORDPRESS_CONNECTIONS_FILE;
+  if (!file) return null;
+  let raw: string;
+  try { raw = readFileSync(file, 'utf8'); }
+  catch { throw new Error('wordpress_connections_file_unreadable'); }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); }
+  catch { throw new Error('wordpress_connections_invalid'); }
+  const entries = connectionSchema.safeParse(parsed);
+  if (!entries.success) throw new Error('wordpress_connections_invalid');
+  const match = Object.entries(entries.data).find(([key]) => {
+    try { return new URL(key).origin === siteUrl && new URL(key).pathname === '/'; }
+    catch { return false; }
+  });
+  return match?.[1] ?? null;
+}
+
+async function wordpressRead(baseUrl: string, route: string): Promise<Response> {
+  const site = wordpressConfig(baseUrl);
+  if (!site) throw new Error('wordpress_not_enabled');
+  const connection = wordpressConnection(baseUrl);
+  if (!connection) throw new Error('wordpress_connection_not_configured');
+  // Fixed REST routes only; never accept arbitrary URLs or redirects.
+  if (!route.startsWith('/wp-json/wp/v2/')) throw new Error('wordpress_invalid_route');
+  const authorization = `Basic ${Buffer.from(`${connection.username}:${connection.applicationPassword}`).toString('base64')}`;
+  return fetch(`${site}${route}`, {
+    method: 'GET', headers: { authorization, accept: 'application/json' },
+    redirect: 'error', signal: AbortSignal.timeout(12_000),
+  });
+}
+
+export async function wordpressConnectionStatus(baseUrl: string) {
+  const site = wordpressConfig(baseUrl);
+  if (!site) return { enabled: false, configured: false, authenticated: false, reason: 'wordpress_not_enabled' };
+  if (!process.env.WORDPRESS_CONNECTIONS_FILE) return { enabled: true, configured: false, authenticated: false, reason: 'wordpress_connection_not_configured' };
+  if (!wordpressConnection(baseUrl)) return { enabled: true, configured: false, authenticated: false, reason: 'wordpress_connection_not_configured' };
+  try {
+    const response = await wordpressRead(baseUrl, '/wp-json/wp/v2/users/me?context=edit');
+    return { enabled: true, configured: true, authenticated: response.ok, reason: response.ok ? null : `wordpress_http_${response.status}` };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'wordpress_connection_failed';
+    return { enabled: true, configured: true, authenticated: false, reason: message.startsWith('wordpress_') ? message : 'wordpress_connection_failed' };
+  }
+}
+
+export function wordpressContentCandidate(pageUrl: string, baseUrl: string) {
+  const page = new URL(pageUrl);
+  const base = new URL(baseUrl);
+  if (page.origin !== base.origin || page.protocol !== 'https:') throw new Error('page_outside_project');
+  const segments = page.pathname.split('/').filter(Boolean);
+  const slug = segments.at(-1) ?? '';
+  if (!slug || !/^[a-z0-9][a-z0-9-]{0,199}$/i.test(slug)) return { supported: false, reason: 'slug_not_mappable' };
+  return { supported: true, slug, candidates: ['posts', 'pages', 'product'] };
+}
+
+/** Resolve a public-facing audited URL to a WordPress REST object.
+ * No content or credentials are returned. Ambiguous matches require manual review.
+ */
+export async function wordpressIssueMapping(baseUrl: string, pageUrl: string) {
+  const candidate = wordpressContentCandidate(pageUrl, baseUrl);
+  if (!candidate.supported || !candidate.slug || !candidate.candidates) return { status: 'manual_review', reason: candidate.reason, matches: [] };
+  const matches: Array<{ type: string; id: number; link: string }> = [];
+  for (const type of candidate.candidates) {
+    const response = await wordpressRead(baseUrl, `/wp-json/wp/v2/${type}?slug=${encodeURIComponent(candidate.slug)}&_fields=id,link&per_page=10`);
+    if (response.status === 404 || response.status === 403) continue;
+    if (!response.ok) throw new Error(`wordpress_mapping_http_${response.status}`);
+    const data: unknown = await response.json();
+    if (!Array.isArray(data)) throw new Error('wordpress_mapping_invalid_response');
+    for (const row of data) {
+      if (!row || typeof row !== 'object') continue;
+      const item = row as { id?: unknown; link?: unknown };
+      if (typeof item.id !== 'number' || typeof item.link !== 'string') continue;
+      try {
+        const url = new URL(item.link);
+        const expected = new URL(pageUrl);
+        if (url.origin === expected.origin && url.pathname.replace(/\/+$/, '') === expected.pathname.replace(/\/+$/, '')) matches.push({ type, id: item.id, link: item.link });
+      } catch { /* Ignore malformed WordPress links. */ }
+    }
+  }
+  return { status: matches.length === 1 ? 'matched' : 'manual_review', reason: matches.length > 1 ? 'ambiguous_matches' : matches.length === 0 ? 'no_exact_match' : null, matches };
 }

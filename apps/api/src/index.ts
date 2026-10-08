@@ -5,7 +5,7 @@ import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
 import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
-import { discoverWordpress, remediationPreview } from './wordpress.js';
+import { discoverWordpress, remediationPreview, wordpressConnectionStatus, wordpressIssueMapping } from './wordpress.js';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
@@ -54,6 +54,27 @@ app.get('/api/v1/projects/:projectId/wordpress/status', async (req, reply) => {
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   try { return await discoverWordpress(project.baseUrl); }
   catch { return reply.code(409).send({ error: 'wordpress_configuration_invalid' }); }
+});
+app.get('/api/v1/projects/:projectId/wordpress/connection', async (req, reply) => {
+  const { projectId } = z.object({ projectId: z.string().min(1) }).parse(req.params);
+  const project = await googleProject(projectId);
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  try { return await wordpressConnectionStatus(project.baseUrl); }
+  catch { return reply.code(409).send({ error: 'wordpress_connection_configuration_invalid' }); }
+});
+app.get('/api/v1/audits/:auditId/wordpress/issue-mapping', async (req, reply) => {
+  const { auditId } = z.object({ auditId: z.string().min(1) }).parse(req.params);
+  const parsed = z.object({ issueId: z.string().min(1) }).safeParse(req.query);
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_issue_id' });
+  const issue = await db.issue.findFirst({ where: { id: parsed.data.issueId, auditId }, include: { page: true, audit: { include: { project: true } } } });
+  if (!issue) return reply.code(404).send({ error: 'issue_not_found' });
+  if (!issue.page) return reply.code(409).send({ error: 'issue_has_no_page' });
+  try { return { issueId: issue.id, ruleId: issue.ruleId, ...(await wordpressIssueMapping(issue.audit.project.baseUrl, issue.page.finalUrl)), executable: false }; }
+  catch (error) {
+    const code = error instanceof Error ? error.message : 'wordpress_mapping_failed';
+    req.log.warn({ code }, 'WordPress read-only mapping failed');
+    return reply.code(502).send({ error: code.startsWith('wordpress_') ? code : 'wordpress_mapping_failed' });
+  }
 });
 app.get('/api/v1/audits/:auditId/wordpress/remediation-preview', async (req, reply) => {
   const { auditId } = z.object({ auditId: z.string().min(1) }).parse(req.params);

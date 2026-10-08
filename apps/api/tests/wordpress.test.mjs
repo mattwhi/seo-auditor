@@ -24,3 +24,20 @@ test('remediation preview is never executable', () => {
   assert.equal(result.requiresApproval, true);
   assert.throws(() => remediationPreview('title.missing', 'https://evil.example/', 'https://example.com'), /page_outside_project/);
 });
+
+test('v0.8.1 WordPress connection remains disabled without site opt-in', async () => {
+  const { wordpressConnectionStatus } = await import('../dist/wordpress.js');
+  const old = process.env.WORDPRESS_INTEGRATIONS_ENABLED;
+  process.env.WORDPRESS_INTEGRATIONS_ENABLED = 'false';
+  const status = await wordpressConnectionStatus('https://example.com');
+  assert.equal(status.enabled, false);
+  assert.equal(status.authenticated, false);
+  if (old === undefined) delete process.env.WORDPRESS_INTEGRATIONS_ENABLED; else process.env.WORDPRESS_INTEGRATIONS_ENABLED = old;
+});
+
+test('v0.8.1 mapping rejects external pages and non-content slugs', async () => {
+  const { wordpressContentCandidate } = await import('../dist/wordpress.js');
+  assert.throws(() => wordpressContentCandidate('https://evil.example/product/a', 'https://example.com'), /page_outside_project/);
+  assert.equal(wordpressContentCandidate('https://example.com/', 'https://example.com').supported, false);
+  assert.deepEqual(wordpressContentCandidate('https://example.com/product/beef-chews/', 'https://example.com').candidates, ['posts', 'pages', 'product']);
+});

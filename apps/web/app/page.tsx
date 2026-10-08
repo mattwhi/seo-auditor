@@ -12,6 +12,7 @@ type PerformanceResult = { id: string; pageType: string; strategy: string; url: 
 type CrawlFailure = { id: string; url: string; type: string; message: string; statusCode: number | null; attempts: number; createdAt: string };
 type PerformanceHistory = { auditId: string; createdAt: string; results: Array<{ url: string; pageType: string; strategy: string; lighthouseScore: number | null; status: string }> };
 type View = 'platform' | 'overview' | 'history' | 'issues' | 'pages' | 'failures' | 'performance' | 'google' | 'wordpress';
+type WordpressConnection = { enabled: boolean; configured: boolean; authenticated: boolean; reason: string | null };
 type WordpressStatus = { enabled: boolean; restApi: boolean; wordpress: boolean; wooCommerce: boolean; namespaces: string[]; siteUrl?: string; error?: string };
 type GoogleStatus = { enabled: boolean; credentialsConfigured: boolean; searchConsoleConfigured: boolean; analyticsConfigured: boolean };
 type GscReport = { pages: Array<{ page: string; clicks: number; impressions: number; ctr: number; position: number }>; totals: { clicks: number; impressions: number }; note: string };
@@ -86,6 +87,7 @@ export default function Home() {
   const [performance, setPerformance] = useState<PerformanceResult[]>([]);
   const [performanceHistory, setPerformanceHistory] = useState<PerformanceHistory[]>([]);
   const [wordpressStatus, setWordpressStatus] = useState<WordpressStatus | null>(null);
+  const [wordpressConnection, setWordpressConnection] = useState<WordpressConnection | null>(null);
   const [wordpressBusy, setWordpressBusy] = useState(false);
   const [wordpressError, setWordpressError] = useState('');
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
@@ -250,7 +252,13 @@ export default function Home() {
   async function loadWordpress() {
     if (!selectedProject) return;
     setWordpressBusy(true); setWordpressError('');
-    try { setWordpressStatus(await json<WordpressStatus>(`${api}/projects/${selectedProject}/wordpress/status`)); }
+    try {
+      const [status, connection] = await Promise.all([
+        json<WordpressStatus>(`${api}/projects/${selectedProject}/wordpress/status`),
+        json<WordpressConnection>(`${api}/projects/${selectedProject}/wordpress/connection`),
+      ]);
+      setWordpressStatus(status); setWordpressConnection(connection);
+    }
     catch { setWordpressError('Unable to check WordPress integration configuration.'); }
     finally { setWordpressBusy(false); }
   }
@@ -258,7 +266,7 @@ export default function Home() {
   function goToIssues(severity?: string) { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSeverity(severity ?? 'all'); setIssueSearch(''); setView('issues'); }
 
   return <main>
-    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.7.0 DEV</div></header>
+    <header className="topbar"><div><span className="eyebrow">OPEN SOURCE · PRE-ALPHA</span><h1>SEO Auditor</h1><p>Run deterministic technical SEO audits and inspect the evidence behind every finding.</p></div><div className="version">v0.8.1 DEV</div></header>
     {error && <div className="alert">{error}</div>}
     <section className="workspace">
       <aside className="sidebar panel">
@@ -297,7 +305,7 @@ export default function Home() {
           {view === 'issues' && selectedRule && <IssueWorkspace rule={selectedRule} issues={visibleRuleIssues} total={filteredRuleIssues.length} search={issueSearch} setSearch={(value) => { setIssueSearch(value); setUrlPage(0); }} page={urlPage} setPage={setUrlPage} selected={selectedIssue} setSelected={setSelectedIssue} onBack={() => { setSelectedRule(null); setRuleIssues([]); setSelectedIssue(null); setIssueSearch(''); }} />}
           {view === 'pages' && <section className="panel"><div className="section-title"><div><span className="eyebrow">PAGES</span><h2>Crawl results</h2><p>Search across requested URL, final URL and page title.</p></div><span>{filteredPages.length} of {pages.length} pages</span></div><div className="filters single"><input placeholder="Search URLs or titles" value={pageSearch} onChange={(e) => { setPageSearch(e.target.value); setIssuePage(0); }} /></div><div className="table-wrap"><table><thead><tr><th>URL</th><th>Status</th><th>Depth</th><th>Response</th><th>Title</th><th>Issues</th></tr></thead><tbody>{visiblePages.map((page) => <tr key={page.id}><td className="url-cell" title={page.url}>{page.url}</td><td><span className={`http ${page.statusCode >= 400 ? 'bad' : page.statusCode >= 300 ? 'warn' : 'good'}`}>{page.statusCode}</span></td><td>{page.crawlDepth ?? '—'}</td><td>{page.responseTimeMs} ms</td><td className="title-cell">{page.title || <em>Missing</em>}</td><td>{page._count.issues}</td></tr>)}</tbody></table></div><Pager page={issuePage} total={filteredPages.length} setPage={setIssuePage} /></section>}
           {view === 'wordpress' && <section className="panel">
-            <div className="section-title"><div><span className="eyebrow">v0.8 · PLATFORM PACKS</span><h2>WordPress &amp; WooCommerce</h2><p>Read-only platform discovery and remediation planning. No live changes can be applied.</p></div><button onClick={() => void loadWordpress()} disabled={wordpressBusy}>{wordpressBusy ? 'Checking…' : 'Refresh'}</button></div>
+            <div className="section-title"><div><span className="eyebrow">v0.8.1 · PLATFORM PACKS</span><h2>WordPress &amp; WooCommerce</h2><p>Read-only platform discovery and remediation planning. No live changes can be applied.</p></div><button onClick={() => void loadWordpress()} disabled={wordpressBusy}>{wordpressBusy ? 'Checking…' : 'Refresh'}</button></div>
             {wordpressError && <p role="alert">{wordpressError}</p>}
             {!wordpressStatus && !wordpressError && <p>Check the project's WordPress REST API to identify available platform capabilities.</p>}
             {wordpressStatus && <>
@@ -307,6 +315,9 @@ export default function Home() {
               {wordpressStatus.error && <p role="alert">Discovery issue: {wordpressStatus.error}</p>}
               {!wordpressStatus.enabled && <p>To enable, configure WORDPRESS_INTEGRATIONS_ENABLED and WORDPRESS_PROJECT_SITES on the API container.</p>}
               {wordpressStatus.namespaces.length > 0 && <details><summary>Detected REST namespaces ({wordpressStatus.namespaces.length})</summary><p>{wordpressStatus.namespaces.join(' · ')}</p></details>}
+              <h3>Authenticated connection (read-only)</h3>
+              {wordpressConnection ? <p>Application Password: <strong>{wordpressConnection.configured ? 'Configured' : 'Not configured'}</strong> · Authentication: <strong>{wordpressConnection.authenticated ? 'Verified' : 'Not verified'}</strong>{wordpressConnection.reason ? ` · ${wordpressConnection.reason}` : ''}</p> : <p>Checking connection…</p>}
+              <p>v0.8.1 maps individual audit issues to WordPress posts, pages and products through the read-only issue-mapping API. No editing, approval or execution endpoints exist.</p>
               <h3>Remediation workflow</h3><p>SEO findings remain separate from WordPress changes. Draft remediation guidance is available through the read-only API. Approval, execution, rollback and verification require an authenticated operator workflow and are deliberately disabled in this foundation release.</p>
             </>}
           </section>}
