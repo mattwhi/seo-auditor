@@ -1,12 +1,22 @@
 import Fastify from 'fastify';
-import { timingSafeEqual, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { executionAuthorized, writesEnabled } from './remediation-security.js';
 import { z } from 'zod';
 import { db } from '@seo-auditor/database';
 import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
 import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
-import { discoverWordpress, remediationPreview, wordpressConnectionStatus, wordpressIssueMapping, wordpressConfig, wordpressSeoSnapshot, wordpressSeoWrite } from './wordpress.js';
+import {
+  discoverWordpress,
+  remediationPreview,
+  wordpressConnectionStatus,
+  wordpressIssueMapping,
+  wordpressConfig,
+  wordpressSeoSnapshot,
+  wordpressSeoWrite,
+} from './wordpress.js';
+import { timingSafeEqual } from 'node:crypto';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 const queue = makeAuditQueue(config.REDIS_URL);
@@ -24,26 +34,45 @@ app.get('/ready', async (_req, reply) => {
 });
 // Google reports are read-only and explicitly disabled unless configured server-side.
 // Do not expose this API publicly without authentication and access controls.
-const googleDates = z.object({ startDate: z.iso.date(), endDate: z.iso.date() }).refine((v) => v.startDate <= v.endDate && (Date.parse(v.endDate) - Date.parse(v.startDate)) <= 366 * 24 * 60 * 60 * 1000, { message: 'invalid_date_range' });
-async function googleProject(projectId: string) { return db.project.findUnique({ where: { id: projectId }, select: { baseUrl: true } }); }
+const googleDates = z
+  .object({ startDate: z.iso.date(), endDate: z.iso.date() })
+  .refine(
+    (v) =>
+      v.startDate <= v.endDate &&
+      Date.parse(v.endDate) - Date.parse(v.startDate) <= 366 * 24 * 60 * 60 * 1000,
+    { message: 'invalid_date_range' },
+  );
+async function googleProject(projectId: string) {
+  return db.project.findUnique({ where: { id: projectId }, select: { baseUrl: true } });
+}
 app.get('/api/v1/projects/:projectId/google/status', async (req, reply) => {
   const { projectId } = z.object({ projectId: z.string() }).parse(req.params);
   const project = await googleProject(projectId);
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  try { return googleStatus(project.baseUrl); } catch { return reply.code(500).send({ error: 'google_configuration_invalid' }); }
+  try {
+    return googleStatus(project.baseUrl);
+  } catch {
+    return reply.code(500).send({ error: 'google_configuration_invalid' });
+  }
 });
-for (const [kind, reporter] of [['search-console', searchConsoleReport], ['analytics', analyticsReport]] as const) {
+for (const [kind, reporter] of [
+  ['search-console', searchConsoleReport],
+  ['analytics', analyticsReport],
+] as const) {
   app.get(`/api/v1/projects/:projectId/google/${kind}`, async (req, reply) => {
     const { projectId } = z.object({ projectId: z.string() }).parse(req.params);
     const dates = googleDates.safeParse(req.query);
     if (!dates.success) return reply.code(400).send({ error: 'invalid_date_range' });
     const project = await googleProject(projectId);
     if (!project) return reply.code(404).send({ error: 'project_not_found' });
-    try { return await reporter(project.baseUrl, dates.data.startDate, dates.data.endDate); }
-    catch (error) {
+    try {
+      return await reporter(project.baseUrl, dates.data.startDate, dates.data.endDate);
+    } catch (error) {
       const code = error instanceof Error ? error.message : 'google_request_failed';
       req.log.warn({ code, kind }, 'Google integration request failed');
-      return reply.code(code.includes('not_configured') || code.includes('disabled') ? 409 : 502).send({ error: code });
+      return reply
+        .code(code.includes('not_configured') || code.includes('disabled') ? 409 : 502)
+        .send({ error: code });
     }
   });
 }
@@ -53,38 +82,61 @@ app.get('/api/v1/projects/:projectId/wordpress/status', async (req, reply) => {
   const { projectId } = z.object({ projectId: z.string().min(1) }).parse(req.params);
   const project = await googleProject(projectId);
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  try { return await discoverWordpress(project.baseUrl); }
-  catch { return reply.code(409).send({ error: 'wordpress_configuration_invalid' }); }
+  try {
+    return await discoverWordpress(project.baseUrl);
+  } catch {
+    return reply.code(409).send({ error: 'wordpress_configuration_invalid' });
+  }
 });
 app.get('/api/v1/projects/:projectId/wordpress/connection', async (req, reply) => {
   const { projectId } = z.object({ projectId: z.string().min(1) }).parse(req.params);
   const project = await googleProject(projectId);
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  try { return await wordpressConnectionStatus(project.baseUrl); }
-  catch { return reply.code(409).send({ error: 'wordpress_connection_configuration_invalid' }); }
+  try {
+    return await wordpressConnectionStatus(project.baseUrl);
+  } catch {
+    return reply.code(409).send({ error: 'wordpress_connection_configuration_invalid' });
+  }
 });
 app.get('/api/v1/audits/:auditId/wordpress/issue-mapping', async (req, reply) => {
   const { auditId } = z.object({ auditId: z.string().min(1) }).parse(req.params);
   const parsed = z.object({ issueId: z.string().min(1) }).safeParse(req.query);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_issue_id' });
-  const issue = await db.issue.findFirst({ where: { id: parsed.data.issueId, auditId }, include: { page: true, audit: { include: { project: true } } } });
+  const issue = await db.issue.findFirst({
+    where: { id: parsed.data.issueId, auditId },
+    include: { page: true, audit: { include: { project: true } } },
+  });
   if (!issue) return reply.code(404).send({ error: 'issue_not_found' });
   if (!issue.page) return reply.code(409).send({ error: 'issue_has_no_page' });
-  try { return { issueId: issue.id, ruleId: issue.ruleId, ...(await wordpressIssueMapping(issue.audit.project.baseUrl, issue.page.finalUrl)), executable: false }; }
-  catch (error) {
+  try {
+    return {
+      issueId: issue.id,
+      ruleId: issue.ruleId,
+      ...(await wordpressIssueMapping(issue.audit.project.baseUrl, issue.page.finalUrl)),
+      executable: false,
+    };
+  } catch (error) {
     const code = error instanceof Error ? error.message : 'wordpress_mapping_failed';
     req.log.warn({ code }, 'WordPress read-only mapping failed');
-    return reply.code(502).send({ error: code.startsWith('wordpress_') ? code : 'wordpress_mapping_failed' });
+    return reply
+      .code(502)
+      .send({ error: code.startsWith('wordpress_') ? code : 'wordpress_mapping_failed' });
   }
 });
 app.get('/api/v1/audits/:auditId/wordpress/remediation-preview', async (req, reply) => {
   const { auditId } = z.object({ auditId: z.string().min(1) }).parse(req.params);
   const { issueId } = z.object({ issueId: z.string().min(1) }).parse(req.query);
-  const issue = await db.issue.findFirst({ where: { id: issueId, auditId }, include: { page: true, audit: { include: { project: true } } } });
+  const issue = await db.issue.findFirst({
+    where: { id: issueId, auditId },
+    include: { page: true, audit: { include: { project: true } } },
+  });
   if (!issue) return reply.code(404).send({ error: 'issue_not_found' });
   if (!issue.page) return reply.code(409).send({ error: 'issue_has_no_page' });
-  try { return remediationPreview(issue.ruleId, issue.page.finalUrl, issue.audit.project.baseUrl); }
-  catch { return reply.code(409).send({ error: 'issue_page_outside_project' }); }
+  try {
+    return remediationPreview(issue.ruleId, issue.page.finalUrl, issue.audit.project.baseUrl);
+  } catch {
+    return reply.code(409).send({ error: 'issue_page_outside_project' });
+  }
 });
 // v0.8.2: API-only operator gate. No browser-held token, no WordPress mutations.
 // Never log or return the bearer token. Set REMEDIATION_OPERATOR_TOKEN only on API.
@@ -95,48 +147,88 @@ function operatorAuthorized(authorization: string | undefined): boolean {
   const secret = Buffer.from(expected, 'utf8');
   return received.length === secret.length && timingSafeEqual(received, secret);
 }
-const proposalInput = z.object({
-  auditId: z.string().min(1), issueId: z.string().min(1),
-  targetType: z.enum(['posts', 'pages', 'product']), targetId: z.number().int().positive(),
-  proposedText: z.string().trim().min(3).max(500),
-}).strict();
+const proposalInput = z
+  .object({
+    auditId: z.string().min(1),
+    issueId: z.string().min(1),
+    targetType: z.enum(['posts', 'pages', 'product']),
+    targetId: z.number().int().positive(),
+    proposedText: z.string().trim().min(3).max(500),
+  })
+  .strict();
 const proposalId = z.object({ proposalId: z.string().min(1) });
 const proposalRead = z.object({ projectId: z.string().min(1) });
-const allowedProposalRules = new Set(['title.missing', 'title.too-short', 'title.too-long', 'description.missing', 'description.too-short', 'description.too-long']);
+const allowedProposalRules = new Set([
+  'title.missing',
+  'title.too-short',
+  'title.too-long',
+  'description.missing',
+  'description.too-short',
+  'description.too-long',
+]);
 app.get('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  if (!operatorAuthorized(req.headers.authorization))
+    return reply.code(401).send({ error: 'operator_unauthorized' });
   const parsed = proposalRead.safeParse(req.params);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_project' });
-  return db.remediationProposal.findMany({ where: { projectId: parsed.data.projectId }, orderBy: { createdAt: 'desc' }, take: 100 });
+  return db.remediationProposal.findMany({
+    where: { projectId: parsed.data.projectId },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
 });
 app.post('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  if (!operatorAuthorized(req.headers.authorization))
+    return reply.code(401).send({ error: 'operator_unauthorized' });
   const projectParams = proposalRead.safeParse(req.params);
   const input = proposalInput.safeParse(req.body);
-  if (!projectParams.success || !input.success) return reply.code(400).send({ error: 'invalid_proposal' });
+  if (!projectParams.success || !input.success)
+    return reply.code(400).send({ error: 'invalid_proposal' });
   const project = await db.project.findUnique({ where: { id: projectParams.data.projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  try { if (!wordpressConfig(project.baseUrl)) return reply.code(409).send({ error: 'wordpress_not_enabled' }); }
-  catch { return reply.code(409).send({ error: 'wordpress_configuration_invalid' }); }
+  try {
+    if (!wordpressConfig(project.baseUrl))
+      return reply.code(409).send({ error: 'wordpress_not_enabled' });
+  } catch {
+    return reply.code(409).send({ error: 'wordpress_configuration_invalid' });
+  }
   const issue = await db.issue.findFirst({
-    where: { id: input.data.issueId, auditId: input.data.auditId, audit: { projectId: project.id } },
+    where: {
+      id: input.data.issueId,
+      auditId: input.data.auditId,
+      audit: { projectId: project.id },
+    },
     include: { page: true },
   });
   if (!issue?.page) return reply.code(404).send({ error: 'issue_not_found' });
-  if (!allowedProposalRules.has(issue.ruleId)) return reply.code(409).send({ error: 'rule_requires_manual_review' });
+  if (!allowedProposalRules.has(issue.ruleId))
+    return reply.code(409).send({ error: 'rule_requires_manual_review' });
   // Verify that the claimed WordPress object really matches the audited URL.
   let mapping;
-  try { mapping = await wordpressIssueMapping(project.baseUrl, issue.page.finalUrl); }
-  catch { return reply.code(502).send({ error: 'wordpress_mapping_failed' }); }
-  if (mapping.status !== 'matched' || !mapping.matches.some((m) => m.type === input.data.targetType && m.id === input.data.targetId)) {
+  try {
+    mapping = await wordpressIssueMapping(project.baseUrl, issue.page.finalUrl);
+  } catch {
+    return reply.code(502).send({ error: 'wordpress_mapping_failed' });
+  }
+  if (
+    mapping.status !== 'matched' ||
+    !mapping.matches.some((m) => m.type === input.data.targetType && m.id === input.data.targetId)
+  ) {
     return reply.code(409).send({ error: 'wordpress_target_not_verified' });
   }
-  const proposal = await db.remediationProposal.create({ data: {
-    projectId: project.id, auditId: input.data.auditId, issueId: issue.id,
-    pageUrl: issue.page.finalUrl, ruleId: issue.ruleId,
-    targetType: input.data.targetType, targetId: input.data.targetId,
-    proposedText: input.data.proposedText, status: 'draft',
-  } });
+  const proposal = await db.remediationProposal.create({
+    data: {
+      projectId: project.id,
+      auditId: input.data.auditId,
+      issueId: issue.id,
+      pageUrl: issue.page.finalUrl,
+      ruleId: issue.ruleId,
+      targetType: input.data.targetType,
+      targetId: input.data.targetId,
+      proposedText: input.data.proposedText,
+      status: 'draft',
+    },
+  });
   return reply.code(201).send({ ...proposal, executable: false });
 });
 // v0.8.4: operator-only read-only preflight through the Rank Math bridge.
@@ -144,164 +236,339 @@ app.post('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) =
 // plugin-owned metadata and must be rechecked by a future execution adapter.
 const preflightParams = z.object({ proposalId: z.string().min(1) });
 app.post('/api/v1/wordpress/proposals/:proposalId/preflight', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  if (!operatorAuthorized(req.headers.authorization))
+    return reply.code(401).send({ error: 'operator_unauthorized' });
   const parsed = preflightParams.safeParse(req.params);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
-  const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId } });
+  const proposal = await db.remediationProposal.findUnique({
+    where: { id: parsed.data.proposalId },
+  });
   if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
-  if (proposal.status !== 'approved') return reply.code(409).send({ error: 'proposal_not_approved' });
+  if (proposal.status !== 'approved')
+    return reply.code(409).send({ error: 'proposal_not_approved' });
   const project = await db.project.findUnique({ where: { id: proposal.projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   try {
     const mapping = await wordpressIssueMapping(project.baseUrl, proposal.pageUrl);
-    if (mapping.status !== 'matched' || mapping.matches.length !== 1 ||
-        mapping.matches[0]?.type !== proposal.targetType || mapping.matches[0]?.id !== proposal.targetId) {
+    if (
+      mapping.status !== 'matched' ||
+      mapping.matches.length !== 1 ||
+      mapping.matches[0]?.type !== proposal.targetType ||
+      mapping.matches[0]?.id !== proposal.targetId
+    ) {
       return reply.code(409).send({ error: 'wordpress_target_changed' });
     }
-    const snapshot = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
-    if (!snapshot.verified) return reply.code(409).send({ error: snapshot.reason, executable: false });
-    const digest = createHash('sha256').update(JSON.stringify({
-      type: proposal.targetType, id: proposal.targetId, field: snapshot.field, value: snapshot.value,
-    })).digest('hex');
+    const snapshot = await wordpressSeoSnapshot(
+      project.baseUrl,
+      proposal.targetType,
+      proposal.targetId,
+      proposal.ruleId,
+    );
+    if (!snapshot.verified)
+      return reply.code(409).send({ error: snapshot.reason, executable: false });
+    const digest = createHash('sha256')
+      .update(
+        JSON.stringify({
+          type: proposal.targetType,
+          id: proposal.targetId,
+          field: snapshot.field,
+          value: snapshot.value,
+        }),
+      )
+      .digest('hex');
     const previous = await db.remediationPreflight.findFirst({
-      where: { proposalId: proposal.id }, orderBy: { createdAt: 'desc' },
+      where: { proposalId: proposal.id },
+      orderBy: { createdAt: 'desc' },
     });
     const conflict = Boolean(previous && previous.snapshotHash !== digest);
-    const saved = await db.remediationPreflight.create({ data: {
-      proposalId: proposal.id, snapshotHash: digest, adapter: snapshot.adapter,
-      field: snapshot.field, originalValue: snapshot.value, conflict,
-    } });
-    return { id: saved.id, proposalId: proposal.id, status: conflict ? 'conflict' : 'ready_for_review',
-      adapter: snapshot.adapter, field: snapshot.field, originalValue: snapshot.value,
-      proposedText: proposal.proposedText, snapshotHash: digest, conflict,
-      executable: false, note: 'Read-only preflight. WordPress was not modified.' };
+    const saved = await db.remediationPreflight.create({
+      data: {
+        proposalId: proposal.id,
+        snapshotHash: digest,
+        adapter: snapshot.adapter,
+        field: snapshot.field,
+        originalValue: snapshot.value,
+        conflict,
+      },
+    });
+    return {
+      id: saved.id,
+      proposalId: proposal.id,
+      status: conflict ? 'conflict' : 'ready_for_review',
+      adapter: snapshot.adapter,
+      field: snapshot.field,
+      originalValue: snapshot.value,
+      proposedText: proposal.proposedText,
+      snapshotHash: digest,
+      conflict,
+      executable: false,
+      note: 'Read-only preflight. WordPress was not modified.',
+    };
   } catch (error) {
-    req.log.warn({ code: error instanceof Error ? error.message : 'wordpress_preflight_failed' }, 'WordPress preflight failed');
+    req.log.warn(
+      { code: error instanceof Error ? error.message : 'wordpress_preflight_failed' },
+      'WordPress preflight failed',
+    );
     return reply.code(502).send({ error: 'wordpress_preflight_failed', executable: false });
   }
 });
 app.get('/api/v1/wordpress/proposals/:proposalId/preflights', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  if (!operatorAuthorized(req.headers.authorization))
+    return reply.code(401).send({ error: 'operator_unauthorized' });
   const parsed = preflightParams.safeParse(req.params);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
-  const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId }, select: { id: true } });
+  const proposal = await db.remediationProposal.findUnique({
+    where: { id: parsed.data.proposalId },
+    select: { id: true },
+  });
   if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
-  return { executable: false, items: await db.remediationPreflight.findMany({
-    where: { proposalId: proposal.id }, orderBy: { createdAt: 'desc' }, take: 50,
-  }) };
+  return {
+    executable: false,
+    items: await db.remediationPreflight.findMany({
+      where: { proposalId: proposal.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    }),
+  };
 });
 // v0.8 completion: explicit, independently gated metadata execution and rollback.
 // Both API and WordPress bridge default to writes disabled. Never expose on public API.
-function executionAuthorized(authorization: string | undefined): boolean {
-  const expected = process.env.REMEDIATION_EXECUTION_TOKEN;
-  if (!expected || expected.length < 48 || !authorization?.startsWith('Bearer ')) return false;
-  const received = Buffer.from(authorization.slice(7), 'utf8');
-  const secret = Buffer.from(expected, 'utf8');
-  return received.length === secret.length && timingSafeEqual(received, secret);
-}
-function writesEnabled(baseUrl: string): boolean {
-  if (process.env.REMEDIATION_WRITES_ENABLED !== 'true') return false;
-  const allowed = (process.env.REMEDIATION_WRITE_ALLOWED_ORIGINS ?? '').split(',').map((v) => v.trim()).filter(Boolean);
-  return allowed.includes(new URL(baseUrl).origin);
-}
-const executionInput = z.object({ preflightId: z.string().min(1), confirm: z.literal('EXECUTE_APPROVED_REMEDIATION') }).strict();
+const executionInput = z
+  .object({ preflightId: z.string().min(1), confirm: z.literal('EXECUTE_APPROVED_REMEDIATION') })
+  .strict();
 const rollbackInput = z.object({ confirm: z.literal('ROLLBACK_REMEDIATION') }).strict();
-const snapshotDigest = (targetType: string, targetId: number, field: string, value: string) => createHash('sha256').update(JSON.stringify({ type: targetType, id: targetId, field, value })).digest('hex');
+const snapshotDigest = (targetType: string, targetId: number, field: string, value: string) =>
+  createHash('sha256')
+    .update(JSON.stringify({ type: targetType, id: targetId, field, value }))
+    .digest('hex');
 app.get('/api/v1/wordpress/proposals/:proposalId/execution', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+  if (!operatorAuthorized(req.headers.authorization))
+    return reply.code(401).send({ error: 'operator_unauthorized' });
   const parsed = proposalId.safeParse(req.params);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
-  const record = await db.remediationExecution.findUnique({ where: { proposalId: parsed.data.proposalId } });
+  const record = await db.remediationExecution.findUnique({
+    where: { proposalId: parsed.data.proposalId },
+  });
   return record ?? reply.code(404).send({ error: 'execution_not_found' });
 });
 app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) => {
-  if (!executionAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'execution_unauthorized' });
+  if (!executionAuthorized(req.headers.authorization))
+    return reply.code(401).send({ error: 'execution_unauthorized' });
   const parsed = proposalId.safeParse(req.params);
   const input = executionInput.safeParse(req.body);
-  if (!parsed.success || !input.success) return reply.code(400).send({ error: 'invalid_execution_request' });
-  const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId } });
+  if (!parsed.success || !input.success)
+    return reply.code(400).send({ error: 'invalid_execution_request' });
+  const proposal = await db.remediationProposal.findUnique({
+    where: { id: parsed.data.proposalId },
+  });
   if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
   const project = await db.project.findUnique({ where: { id: proposal.projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   if (!writesEnabled(project.baseUrl)) return reply.code(403).send({ error: 'execution_disabled' });
-  if (proposal.status !== 'approved') return reply.code(409).send({ error: 'proposal_not_approved' });
-  const preflight = await db.remediationPreflight.findUnique({ where: { id: input.data.preflightId } });
-  if (!preflight || preflight.proposalId !== proposal.id || preflight.conflict) return reply.code(409).send({ error: 'invalid_preflight' });
-  if (Date.now() - preflight.createdAt.getTime() > 15 * 60 * 1000) return reply.code(409).send({ error: 'preflight_expired' });
-  const latest = await db.remediationPreflight.findFirst({ where: { proposalId: proposal.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+  if (proposal.status !== 'approved')
+    return reply.code(409).send({ error: 'proposal_not_approved' });
+  const preflight = await db.remediationPreflight.findUnique({
+    where: { id: input.data.preflightId },
+  });
+  if (!preflight || preflight.proposalId !== proposal.id || preflight.conflict)
+    return reply.code(409).send({ error: 'invalid_preflight' });
+  if (Date.now() - preflight.createdAt.getTime() > 15 * 60 * 1000)
+    return reply.code(409).send({ error: 'preflight_expired' });
+  const latest = await db.remediationPreflight.findFirst({
+    where: { proposalId: proposal.id },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+  });
   if (latest?.id !== preflight.id) return reply.code(409).send({ error: 'preflight_not_latest' });
   // A unique execution row and atomic proposal state transition prevent duplicate submissions.
-  const locked = await db.remediationProposal.updateMany({ where: { id: proposal.id, status: 'approved' }, data: { status: 'executing' } });
+  const locked = await db.remediationProposal.updateMany({
+    where: { id: proposal.id, status: 'approved' },
+    data: { status: 'executing' },
+  });
   if (!locked.count) return reply.code(409).send({ error: 'proposal_already_processed' });
   let record: { id: string } | null = null;
   try {
-    record = await db.remediationExecution.create({ data: {
-      proposalId: proposal.id, preflightId: preflight.id, projectId: proposal.projectId,
-      field: preflight.field, originalValue: preflight.originalValue, appliedValue: proposal.proposedText,
-      snapshotHash: preflight.snapshotHash, status: 'pending',
-    } });
+    record = await db.remediationExecution.create({
+      data: {
+        proposalId: proposal.id,
+        preflightId: preflight.id,
+        projectId: proposal.projectId,
+        field: preflight.field,
+        originalValue: preflight.originalValue,
+        appliedValue: proposal.proposedText,
+        snapshotHash: preflight.snapshotHash,
+        status: 'pending',
+      },
+    });
     const mapping = await wordpressIssueMapping(project.baseUrl, proposal.pageUrl);
-    if (mapping.status !== 'matched' || mapping.matches.length !== 1 || mapping.matches[0]?.type !== proposal.targetType || mapping.matches[0]?.id !== proposal.targetId) throw new Error('wordpress_target_changed');
-    const before = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
-    if (!before.verified || before.field !== preflight.field || snapshotDigest(proposal.targetType, proposal.targetId, before.field, before.value) !== preflight.snapshotHash) throw new Error('wordpress_metadata_conflict');
-    await wordpressSeoWrite(project.baseUrl, proposal.targetType, proposal.targetId, preflight.field, preflight.originalValue, proposal.proposedText);
-    const after = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
-    if (!after.verified || after.value !== proposal.proposedText) throw new Error('wordpress_write_verification_failed');
-    await db.remediationExecution.update({ where: { id: record.id }, data: { status: 'verified', executedAt: new Date() } });
-    await db.remediationProposal.update({ where: { id: proposal.id }, data: { status: 'executed' } });
-    return { status: 'verified', proposalId: proposal.id, executionId: record.id, executable: false, note: 'Write verified; rollback remains available.' };
+    if (
+      mapping.status !== 'matched' ||
+      mapping.matches.length !== 1 ||
+      mapping.matches[0]?.type !== proposal.targetType ||
+      mapping.matches[0]?.id !== proposal.targetId
+    )
+      throw new Error('wordpress_target_changed');
+    const before = await wordpressSeoSnapshot(
+      project.baseUrl,
+      proposal.targetType,
+      proposal.targetId,
+      proposal.ruleId,
+    );
+    if (
+      !before.verified ||
+      before.field !== preflight.field ||
+      snapshotDigest(proposal.targetType, proposal.targetId, before.field, before.value) !==
+        preflight.snapshotHash
+    )
+      throw new Error('wordpress_metadata_conflict');
+    await wordpressSeoWrite(
+      project.baseUrl,
+      proposal.targetType,
+      proposal.targetId,
+      preflight.field,
+      preflight.originalValue,
+      proposal.proposedText,
+    );
+    const after = await wordpressSeoSnapshot(
+      project.baseUrl,
+      proposal.targetType,
+      proposal.targetId,
+      proposal.ruleId,
+    );
+    if (!after.verified || after.value !== proposal.proposedText)
+      throw new Error('wordpress_write_verification_failed');
+    await db.remediationExecution.update({
+      where: { id: record.id },
+      data: { status: 'verified', executedAt: new Date() },
+    });
+    await db.remediationProposal.update({
+      where: { id: proposal.id },
+      data: { status: 'executed' },
+    });
+    return {
+      status: 'verified',
+      proposalId: proposal.id,
+      executionId: record.id,
+      executable: false,
+      note: 'Write verified; rollback remains available.',
+    };
   } catch (error) {
     const code = error instanceof Error ? error.message : 'execution_failed';
     // Fail closed. An ambiguous write failure requires manual reconciliation, never automatic retry.
-    if (record) await db.remediationExecution.update({ where: { id: record.id }, data: { status: 'needs_review', errorCode: code.slice(0, 120) } });
-    await db.remediationProposal.update({ where: { id: proposal.id }, data: { status: 'needs_review' } });
+    if (record)
+      await db.remediationExecution.update({
+        where: { id: record.id },
+        data: { status: 'needs_review', errorCode: code.slice(0, 120) },
+      });
+    await db.remediationProposal.update({
+      where: { id: proposal.id },
+      data: { status: 'needs_review' },
+    });
     req.log.warn({ code }, 'Remediation execution requires review');
     return reply.code(409).send({ error: 'execution_needs_review', reason: code });
   }
 });
 app.post('/api/v1/wordpress/proposals/:proposalId/rollback', async (req, reply) => {
-  if (!executionAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'execution_unauthorized' });
+  if (!executionAuthorized(req.headers.authorization))
+    return reply.code(401).send({ error: 'execution_unauthorized' });
   const parsed = proposalId.safeParse(req.params);
   const input = rollbackInput.safeParse(req.body);
-  if (!parsed.success || !input.success) return reply.code(400).send({ error: 'invalid_rollback_request' });
-  const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId } });
+  if (!parsed.success || !input.success)
+    return reply.code(400).send({ error: 'invalid_rollback_request' });
+  const proposal = await db.remediationProposal.findUnique({
+    where: { id: parsed.data.proposalId },
+  });
   if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
   const project = await db.project.findUnique({ where: { id: proposal.projectId } });
-  if (!project || !writesEnabled(project.baseUrl)) return reply.code(403).send({ error: 'execution_disabled' });
-  const execution = await db.remediationExecution.findUnique({ where: { proposalId: proposal.id } });
-  if (!execution || execution.status !== 'verified') return reply.code(409).send({ error: 'execution_not_verified' });
-  const locked = await db.remediationExecution.updateMany({ where: { id: execution.id, status: 'verified' }, data: { status: 'rolling_back' } });
+  if (!project || !writesEnabled(project.baseUrl))
+    return reply.code(403).send({ error: 'execution_disabled' });
+  const execution = await db.remediationExecution.findUnique({
+    where: { proposalId: proposal.id },
+  });
+  if (!execution || execution.status !== 'verified')
+    return reply.code(409).send({ error: 'execution_not_verified' });
+  const locked = await db.remediationExecution.updateMany({
+    where: { id: execution.id, status: 'verified' },
+    data: { status: 'rolling_back' },
+  });
   if (!locked.count) return reply.code(409).send({ error: 'rollback_already_processed' });
   try {
     const mapping = await wordpressIssueMapping(project.baseUrl, proposal.pageUrl);
-    if (mapping.status !== 'matched' || mapping.matches.length !== 1 || mapping.matches[0]?.type !== proposal.targetType || mapping.matches[0]?.id !== proposal.targetId) throw new Error('wordpress_target_changed');
-    const before = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
-    if (!before.verified || before.value !== execution.appliedValue || before.field !== execution.field) throw new Error('wordpress_metadata_conflict');
-    await wordpressSeoWrite(project.baseUrl, proposal.targetType, proposal.targetId, execution.field, execution.appliedValue, execution.originalValue);
-    const after = await wordpressSeoSnapshot(project.baseUrl, proposal.targetType, proposal.targetId, proposal.ruleId);
-    if (!after.verified || after.value !== execution.originalValue) throw new Error('rollback_verification_failed');
-    await db.remediationExecution.update({ where: { id: execution.id }, data: { status: 'rolled_back', rolledBackAt: new Date() } });
-    await db.remediationProposal.update({ where: { id: proposal.id }, data: { status: 'rolled_back' } });
+    if (
+      mapping.status !== 'matched' ||
+      mapping.matches.length !== 1 ||
+      mapping.matches[0]?.type !== proposal.targetType ||
+      mapping.matches[0]?.id !== proposal.targetId
+    )
+      throw new Error('wordpress_target_changed');
+    const before = await wordpressSeoSnapshot(
+      project.baseUrl,
+      proposal.targetType,
+      proposal.targetId,
+      proposal.ruleId,
+    );
+    if (
+      !before.verified ||
+      before.value !== execution.appliedValue ||
+      before.field !== execution.field
+    )
+      throw new Error('wordpress_metadata_conflict');
+    await wordpressSeoWrite(
+      project.baseUrl,
+      proposal.targetType,
+      proposal.targetId,
+      execution.field,
+      execution.appliedValue,
+      execution.originalValue,
+    );
+    const after = await wordpressSeoSnapshot(
+      project.baseUrl,
+      proposal.targetType,
+      proposal.targetId,
+      proposal.ruleId,
+    );
+    if (!after.verified || after.value !== execution.originalValue)
+      throw new Error('rollback_verification_failed');
+    await db.remediationExecution.update({
+      where: { id: execution.id },
+      data: { status: 'rolled_back', rolledBackAt: new Date() },
+    });
+    await db.remediationProposal.update({
+      where: { id: proposal.id },
+      data: { status: 'rolled_back' },
+    });
     return { status: 'rolled_back', proposalId: proposal.id, executable: false };
   } catch (error) {
     const code = error instanceof Error ? error.message : 'rollback_failed';
-    await db.remediationExecution.update({ where: { id: execution.id }, data: { status: 'rollback_needs_review', errorCode: code.slice(0, 120) } });
+    await db.remediationExecution.update({
+      where: { id: execution.id },
+      data: { status: 'rollback_needs_review', errorCode: code.slice(0, 120) },
+    });
     req.log.warn({ code }, 'Rollback requires review');
     return reply.code(409).send({ error: 'rollback_needs_review', reason: code });
   }
 });
 for (const decision of ['approve', 'reject'] as const) {
   app.post(`/api/v1/wordpress/proposals/:proposalId/${decision}`, async (req, reply) => {
-    if (!operatorAuthorized(req.headers.authorization)) return reply.code(401).send({ error: 'operator_unauthorized' });
+    if (!operatorAuthorized(req.headers.authorization))
+      return reply.code(401).send({ error: 'operator_unauthorized' });
     const parsed = proposalId.safeParse(req.params);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
     const changed = await db.remediationProposal.updateMany({
       where: { id: parsed.data.proposalId, status: 'draft' },
-      data: decision === 'approve' ? { status: 'approved', approvedAt: new Date() } : { status: 'rejected', rejectedAt: new Date() },
+      data:
+        decision === 'approve'
+          ? { status: 'approved', approvedAt: new Date() }
+          : { status: 'rejected', rejectedAt: new Date() },
     });
     if (!changed.count) return reply.code(409).send({ error: 'proposal_not_draft_or_missing' });
-    const proposal = await db.remediationProposal.findUnique({ where: { id: parsed.data.proposalId } });
-    return { ...proposal, executable: false, note: 'Decision recorded. WordPress was not modified.' };
+    const proposal = await db.remediationProposal.findUnique({
+      where: { id: parsed.data.proposalId },
+    });
+    return {
+      ...proposal,
+      executable: false,
+      note: 'Decision recorded. WordPress was not modified.',
+    };
   });
 }
 app.post('/api/v1/projects', async (req, reply) => {
@@ -326,8 +593,23 @@ app.get('/api/v1/projects/:projectId/performance-history', async (req, reply) =>
   const { projectId } = z.object({ projectId: z.string().min(1) }).parse(req.params);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  const audits = await db.audit.findMany({ where: { projectId, status: 'completed' }, orderBy: { createdAt: 'desc' }, take: 25, select: { id: true, createdAt: true, performanceResults: { select: { url: true, pageType: true, strategy: true, lighthouseScore: true, status: true } } } });
-  return audits.map((audit) => ({ auditId: audit.id, createdAt: audit.createdAt, results: audit.performanceResults }));
+  const audits = await db.audit.findMany({
+    where: { projectId, status: 'completed' },
+    orderBy: { createdAt: 'desc' },
+    take: 25,
+    select: {
+      id: true,
+      createdAt: true,
+      performanceResults: {
+        select: { url: true, pageType: true, strategy: true, lighthouseScore: true, status: true },
+      },
+    },
+  });
+  return audits.map((audit) => ({
+    auditId: audit.id,
+    createdAt: audit.createdAt,
+    results: audit.performanceResults,
+  }));
 });
 app.post('/api/v1/projects/:projectId/audits', async (req, reply) => {
   const p = z.object({ projectId: z.string() }).parse(req.params);
@@ -373,7 +655,10 @@ app.get('/api/v1/audits/:auditId/performance', async (req, reply) => {
   const { auditId } = auditIdParams.parse(req.params);
   const audit = await db.audit.findUnique({ where: { id: auditId }, select: { id: true } });
   if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
-  return db.performanceResult.findMany({ where: { auditId }, orderBy: [{ pageType: 'asc' }, { strategy: 'asc' }] });
+  return db.performanceResult.findMany({
+    where: { auditId },
+    orderBy: [{ pageType: 'asc' }, { strategy: 'asc' }],
+  });
 });
 
 app.get('/api/v1/audits/:auditId/compare/:baselineAuditId', async (req, reply) => {
@@ -588,10 +873,15 @@ app.get('/api/v1/pages/:pageId/issues', async (req, reply) => {
   return { page, issues };
 });
 
-
 const projectIdParams = z.object({ projectId: z.string().min(1) });
 
-function nextScheduleRun(frequency: string, hourUtc: number, dayOfWeek?: number | null, dayOfMonth?: number | null, from = new Date()) {
+function nextScheduleRun(
+  frequency: string,
+  hourUtc: number,
+  dayOfWeek?: number | null,
+  dayOfMonth?: number | null,
+  from = new Date(),
+) {
   const next = new Date(from);
   next.setUTCMinutes(0, 0, 0);
   next.setUTCHours(hourUtc);
@@ -610,23 +900,57 @@ function nextScheduleRun(frequency: string, hourUtc: number, dayOfWeek?: number 
 async function enqueueAudit(projectId: string, trigger: 'manual' | 'scheduled' = 'manual') {
   const project = await db.project.findUnique({ where: { id: projectId } });
   if (!project) return null;
-  const active = await db.audit.findFirst({ where: { projectId, status: { in: ['queued', 'running'] } } });
+  const active = await db.audit.findFirst({
+    where: { projectId, status: { in: ['queued', 'running'] } },
+  });
   if (active) return active;
   const audit = await db.audit.create({ data: { projectId, trigger } });
-  await queue.add('crawl', { auditId: audit.id, projectId, startUrl: project.baseUrl, maxUrls: config.CRAWLER_MAX_URLS }, { jobId: audit.id });
+  await queue.add(
+    'crawl',
+    { auditId: audit.id, projectId, startUrl: project.baseUrl, maxUrls: config.CRAWLER_MAX_URLS },
+    { jobId: audit.id },
+  );
   return audit;
 }
 
 app.get('/api/v1/projects/:projectId/platform', async (req, reply) => {
   const { projectId } = projectIdParams.parse(req.params);
-  const project = await db.project.findUnique({ where: { id: projectId }, include: { schedule: true } });
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    include: { schedule: true },
+  });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  const audits = await db.audit.findMany({ where: { projectId, status: 'completed' }, orderBy: { createdAt: 'desc' }, take: 30, include: { _count: { select: { pages: true, issues: true, crawlFailures: true } } } });
+  const audits = await db.audit.findMany({
+    where: { projectId, status: 'completed' },
+    orderBy: { createdAt: 'desc' },
+    take: 30,
+    include: { _count: { select: { pages: true, issues: true, crawlFailures: true } } },
+  });
   const latest = audits[0] ?? null;
   const previous = audits[1] ?? null;
   let regression = null;
   if (latest && previous) {
-    const load = (id: string) => db.audit.findUniqueOrThrow({ where: { id }, select: { id:true, projectId:true, status:true, score:true, pages:{select:{url:true,finalUrl:true}}, issues:{select:{ruleId:true,severity:true,category:true,message:true,evidence:true,page:{select:{url:true,finalUrl:true}}}} } });
+    const load = (id: string) =>
+      db.audit.findUniqueOrThrow({
+        where: { id },
+        select: {
+          id: true,
+          projectId: true,
+          status: true,
+          score: true,
+          pages: { select: { url: true, finalUrl: true } },
+          issues: {
+            select: {
+              ruleId: true,
+              severity: true,
+              category: true,
+              message: true,
+              evidence: true,
+              page: { select: { url: true, finalUrl: true } },
+            },
+          },
+        },
+      });
     regression = compareAudits(await load(latest.id), await load(previous.id));
   }
   return { project, schedule: project.schedule, audits, latest, previous, regression };
@@ -634,32 +958,60 @@ app.get('/api/v1/projects/:projectId/platform', async (req, reply) => {
 
 app.put('/api/v1/projects/:projectId/schedule', async (req, reply) => {
   const { projectId } = projectIdParams.parse(req.params);
-  const body = z.object({ enabled: z.boolean(), frequency: z.enum(['daily','weekly','monthly']), hourUtc: z.number().int().min(0).max(23), dayOfWeek: z.number().int().min(0).max(6).nullable().optional(), dayOfMonth: z.number().int().min(1).max(28).nullable().optional() }).parse(req.body);
+  const body = z
+    .object({
+      enabled: z.boolean(),
+      frequency: z.enum(['daily', 'weekly', 'monthly']),
+      hourUtc: z.number().int().min(0).max(23),
+      dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
+      dayOfMonth: z.number().int().min(1).max(28).nullable().optional(),
+    })
+    .parse(req.body);
   const project = await db.project.findUnique({ where: { id: projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  const nextRunAt = body.enabled ? nextScheduleRun(body.frequency, body.hourUtc, body.dayOfWeek, body.dayOfMonth) : null;
-  return db.auditSchedule.upsert({ where: { projectId }, create: { projectId, ...body, nextRunAt }, update: { ...body, nextRunAt } });
+  const nextRunAt = body.enabled
+    ? nextScheduleRun(body.frequency, body.hourUtc, body.dayOfWeek, body.dayOfMonth)
+    : null;
+  return db.auditSchedule.upsert({
+    where: { projectId },
+    create: { projectId, ...body, nextRunAt },
+    update: { ...body, nextRunAt },
+  });
 });
 
 app.patch('/api/v1/projects/:projectId', async (req, reply) => {
   const { projectId } = projectIdParams.parse(req.params);
   const body = z.object({ retentionDays: z.number().int().min(7).max(3650) }).parse(req.body);
-  try { return await db.project.update({ where: { id: projectId }, data: body }); } catch { return reply.code(404).send({ error: 'project_not_found' }); }
+  try {
+    return await db.project.update({ where: { id: projectId }, data: body });
+  } catch {
+    return reply.code(404).send({ error: 'project_not_found' });
+  }
 });
 
 app.delete('/api/v1/projects/:projectId', async (req, reply) => {
   const { projectId } = projectIdParams.parse(req.params);
-  try { await db.project.delete({ where: { id: projectId } }); return reply.code(204).send(); } catch { return reply.code(404).send({ error: 'project_not_found' }); }
+  try {
+    await db.project.delete({ where: { id: projectId } });
+    return reply.code(204).send();
+  } catch {
+    return reply.code(404).send({ error: 'project_not_found' });
+  }
 });
 
 app.post('/api/v1/audits/:auditId/cancel', async (req, reply) => {
   const { auditId } = auditIdParams.parse(req.params);
   const audit = await db.audit.findUnique({ where: { id: auditId } });
   if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
-  if (!['queued','running'].includes(audit.status)) return reply.code(409).send({ error: 'audit_not_active' });
+  if (!['queued', 'running'].includes(audit.status))
+    return reply.code(409).send({ error: 'audit_not_active' });
   if (audit.status === 'queued') {
-    const job = await queue.getJob(auditId); await job?.remove();
-    return db.audit.update({ where: { id: auditId }, data: { status: 'cancelled', cancelRequested: true, completedAt: new Date() } });
+    const job = await queue.getJob(auditId);
+    await job?.remove();
+    return db.audit.update({
+      where: { id: auditId },
+      data: { status: 'cancelled', cancelRequested: true, completedAt: new Date() },
+    });
   }
   return db.audit.update({ where: { id: auditId }, data: { cancelRequested: true } });
 });
@@ -668,23 +1020,49 @@ app.delete('/api/v1/audits/:auditId', async (req, reply) => {
   const { auditId } = auditIdParams.parse(req.params);
   const audit = await db.audit.findUnique({ where: { id: auditId } });
   if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
-  if (['queued','running'].includes(audit.status)) return reply.code(409).send({ error: 'cannot_delete_active_audit' });
-  await db.audit.delete({ where: { id: auditId } }); return reply.code(204).send();
+  if (['queued', 'running'].includes(audit.status))
+    return reply.code(409).send({ error: 'cannot_delete_active_audit' });
+  await db.audit.delete({ where: { id: auditId } });
+  return reply.code(204).send();
 });
 
 async function runPlatformMaintenance() {
   const now = new Date();
-  const due = await db.auditSchedule.findMany({ where: { enabled: true, nextRunAt: { lte: now } }, include: { project: true } });
+  const due = await db.auditSchedule.findMany({
+    where: { enabled: true, nextRunAt: { lte: now } },
+    include: { project: true },
+  });
   for (const schedule of due) {
     await enqueueAudit(schedule.projectId, 'scheduled');
-    await db.auditSchedule.update({ where: { id: schedule.id }, data: { lastRunAt: now, nextRunAt: nextScheduleRun(schedule.frequency, schedule.hourUtc, schedule.dayOfWeek, schedule.dayOfMonth, now) } });
+    await db.auditSchedule.update({
+      where: { id: schedule.id },
+      data: {
+        lastRunAt: now,
+        nextRunAt: nextScheduleRun(
+          schedule.frequency,
+          schedule.hourUtc,
+          schedule.dayOfWeek,
+          schedule.dayOfMonth,
+          now,
+        ),
+      },
+    });
   }
   const staleCutoff = new Date(now.getTime() - 6 * 60 * 60 * 1000);
-  await db.audit.updateMany({ where: { status: 'running', startedAt: { lt: staleCutoff } }, data: { status: 'failed', completedAt: now } });
+  await db.audit.updateMany({
+    where: { status: 'running', startedAt: { lt: staleCutoff } },
+    data: { status: 'failed', completedAt: now },
+  });
   const projects = await db.project.findMany({ select: { id: true, retentionDays: true } });
   for (const project of projects) {
     const cutoff = new Date(now.getTime() - project.retentionDays * 86400000);
-    await db.audit.deleteMany({ where: { projectId: project.id, createdAt: { lt: cutoff }, status: { notIn: ['queued','running'] } } });
+    await db.audit.deleteMany({
+      where: {
+        projectId: project.id,
+        createdAt: { lt: cutoff },
+        status: { notIn: ['queued', 'running'] },
+      },
+    });
   }
 }
 
