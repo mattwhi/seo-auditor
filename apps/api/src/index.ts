@@ -8,6 +8,11 @@ import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
 import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
 import {
+  proposalExecutionError,
+  preflightExecutionError,
+  rollbackEligibilityError,
+} from './remediation-validation.js';
+import {
   discoverWordpress,
   remediationPreview,
   wordpressConnectionStatus,
@@ -244,8 +249,8 @@ app.post('/api/v1/wordpress/proposals/:proposalId/preflight', async (req, reply)
     where: { id: parsed.data.proposalId },
   });
   if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
-  if (proposal.status !== 'approved')
-    return reply.code(409).send({ error: 'proposal_not_approved' });
+  const approvalError = proposalExecutionError(proposal.status);
+  if (approvalError) return reply.code(409).send({ error: approvalError });
   const project = await db.project.findUnique({ where: { id: proposal.projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   try {
@@ -378,7 +383,14 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
     where: { proposalId: proposal.id },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
   });
-  if (latest?.id !== preflight.id) return reply.code(409).send({ error: 'preflight_not_latest' });
+  const preflightError = preflightExecutionError(
+    preflight,
+    proposal.id,
+    latest?.id ?? null,
+    input.data.preflightId,
+  );
+
+  if (preflightError) return reply.code(409).send({ error: preflightError });
   // A unique execution row and atomic proposal state transition prevent duplicate submissions.
   const locked = await db.remediationProposal.updateMany({
     where: { id: proposal.id, status: 'approved' },
@@ -484,8 +496,12 @@ app.post('/api/v1/wordpress/proposals/:proposalId/rollback', async (req, reply) 
   const execution = await db.remediationExecution.findUnique({
     where: { proposalId: proposal.id },
   });
-  if (!execution || execution.status !== 'verified')
-    return reply.code(409).send({ error: 'execution_not_verified' });
+  const rollbackError = rollbackEligibilityError(execution?.status ?? null);
+
+  if (rollbackError || !execution)
+    return reply.code(409).send({
+      error: rollbackError ?? 'execution_not_verified',
+    });
   const locked = await db.remediationExecution.updateMany({
     where: { id: execution.id, status: 'verified' },
     data: { status: 'rolling_back' },
