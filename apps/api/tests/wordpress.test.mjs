@@ -105,3 +105,57 @@ test('WordPress configuration requires HTTPS except for explicitly allowed stagi
     restore('WORDPRESS_STAGING_HTTP_ENABLED', previous.staging);
   }
 });
+
+test('WordPress mapping permits only explicitly opted-in HTTP staging', async () => {
+  const { wordpressContentCandidate } = await import('../dist/wordpress.js');
+  const key = 'WORDPRESS_STAGING_HTTP_ENABLED';
+  const previous = process.env[key];
+  const staging = 'http://seo-auditor-wp-test-wordpress-1';
+
+  try {
+    delete process.env[key];
+
+    assert.throws(
+      () => wordpressContentCandidate(`${staging}/seo-auditor-remediation-test/`, staging),
+      /page_outside_project/,
+    );
+
+    process.env[key] = 'true';
+
+    const result = wordpressContentCandidate(
+      `${staging}/seo-auditor-remediation-test/`,
+      staging,
+    );
+
+    assert.equal(result.supported, true);
+    assert.equal(result.slug, 'seo-auditor-remediation-test');
+    assert.deepEqual(result.candidates, ['posts', 'pages', 'product']);
+
+    assert.throws(
+      () => wordpressContentCandidate(
+        'http://another-wordpress-container/test/',
+        'http://another-wordpress-container',
+      ),
+      /page_outside_project/,
+    );
+
+    assert.throws(
+      () => wordpressContentCandidate(
+        'http://untrusted.example/test/',
+        staging,
+      ),
+      /page_outside_project/,
+    );
+
+    assert.equal(
+      wordpressContentCandidate(
+        'https://example.com/test/',
+        'https://example.com',
+      ).slug,
+      'test',
+    );
+  } finally {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
+});

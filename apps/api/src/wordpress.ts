@@ -268,7 +268,14 @@ export async function wordpressConnectionStatus(baseUrl: string) {
 export function wordpressContentCandidate(pageUrl: string, baseUrl: string) {
   const page = new URL(pageUrl);
   const base = new URL(baseUrl);
-  if (page.origin !== base.origin || page.protocol !== 'https:')
+  const stagingHttpAllowed =
+    process.env.WORDPRESS_STAGING_HTTP_ENABLED === 'true' &&
+    base.origin === 'http://seo-auditor-wp-test-wordpress-1';
+
+  if (
+    page.origin !== base.origin ||
+    (page.protocol !== 'https:' && !stagingHttpAllowed)
+  )
     throw new Error('page_outside_project');
   const segments = page.pathname.split('/').filter(Boolean);
   const slug = segments.at(-1) ?? '';
