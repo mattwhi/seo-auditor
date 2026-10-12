@@ -370,15 +370,11 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
   const project = await db.project.findUnique({ where: { id: proposal.projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   if (!writesEnabled(project.baseUrl)) return reply.code(403).send({ error: 'execution_disabled' });
-  if (proposal.status !== 'approved')
-    return reply.code(409).send({ error: 'proposal_not_approved' });
+  const approvalError = proposalExecutionError(proposal.status);
+  if (approvalError) return reply.code(409).send({ error: approvalError });
   const preflight = await db.remediationPreflight.findUnique({
     where: { id: input.data.preflightId },
   });
-  if (!preflight || preflight.proposalId !== proposal.id || preflight.conflict)
-    return reply.code(409).send({ error: 'invalid_preflight' });
-  if (Date.now() - preflight.createdAt.getTime() > 15 * 60 * 1000)
-    return reply.code(409).send({ error: 'preflight_expired' });
   const latest = await db.remediationPreflight.findFirst({
     where: { proposalId: proposal.id },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -389,8 +385,8 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
     latest?.id ?? null,
     input.data.preflightId,
   );
-
-  if (preflightError) return reply.code(409).send({ error: preflightError });
+  if (preflightError || !preflight)
+    return reply.code(409).send({ error: preflightError ?? 'invalid_preflight' });
   // A unique execution row and atomic proposal state transition prevent duplicate submissions.
   const locked = await db.remediationProposal.updateMany({
     where: { id: proposal.id, status: 'approved' },
@@ -399,7 +395,7 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
   if (!locked.count) return reply.code(409).send({ error: 'proposal_already_processed' });
   let record: { id: string } | null = null;
   try {
-    record = await db.remediationExecution.create({
+    const createdRecord = await db.remediationExecution.create({
       data: {
         proposalId: proposal.id,
         preflightId: preflight.id,
@@ -411,6 +407,7 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
         status: 'pending',
       },
     });
+    record = createdRecord;
     const mapping = await wordpressIssueMapping(project.baseUrl, proposal.pageUrl);
     if (
       mapping.status !== 'matched' ||
@@ -449,7 +446,7 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
     if (!after.verified || after.value !== proposal.proposedText)
       throw new Error('wordpress_write_verification_failed');
     await db.remediationExecution.update({
-      where: { id: record.id },
+      where: { id: createdRecord.id },
       data: { status: 'verified', executedAt: new Date() },
     });
     await db.remediationProposal.update({
@@ -459,7 +456,7 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
     return {
       status: 'verified',
       proposalId: proposal.id,
-      executionId: record.id,
+      executionId: createdRecord.id,
       executable: false,
       note: 'Write verified; rollback remains available.',
     };
@@ -497,7 +494,6 @@ app.post('/api/v1/wordpress/proposals/:proposalId/rollback', async (req, reply) 
     where: { proposalId: proposal.id },
   });
   const rollbackError = rollbackEligibilityError(execution?.status ?? null);
-
   if (rollbackError || !execution)
     return reply.code(409).send({
       error: rollbackError ?? 'execution_not_verified',
@@ -621,7 +617,7 @@ app.get('/api/v1/projects/:projectId/performance-history', async (req, reply) =>
       },
     },
   });
-  return audits.map((audit) => ({
+  return audits.map((audit: { id: string; createdAt: Date; performanceResults: unknown }) => ({
     auditId: audit.id,
     createdAt: audit.createdAt,
     results: audit.performanceResults,
@@ -656,7 +652,6 @@ const issueQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
-
 app.get('/api/v1/audits/:auditId', async (req, reply) => {
   const p = auditIdParams.parse(req.params);
   const a = await db.audit.findUnique({
@@ -665,7 +660,6 @@ app.get('/api/v1/audits/:auditId', async (req, reply) => {
   });
   return a ?? reply.code(404).send({ error: 'audit_not_found' });
 });
-
 // v0.6 performance results: measured independently from the technical SEO score.
 app.get('/api/v1/audits/:auditId/performance', async (req, reply) => {
   const { auditId } = auditIdParams.parse(req.params);
@@ -676,16 +670,13 @@ app.get('/api/v1/audits/:auditId/performance', async (req, reply) => {
     orderBy: [{ pageType: 'asc' }, { strategy: 'asc' }],
   });
 });
-
 app.get('/api/v1/audits/:auditId/compare/:baselineAuditId', async (req, reply) => {
   const params = z
     .object({ auditId: z.string().min(1), baselineAuditId: z.string().min(1) })
     .parse(req.params);
-
   if (params.auditId === params.baselineAuditId) {
     return reply.code(400).send({ error: 'audits_must_be_different' });
   }
-
   const audits = await db.audit.findMany({
     where: { id: { in: [params.auditId, params.baselineAuditId] } },
     select: {
@@ -706,9 +697,8 @@ app.get('/api/v1/audits/:auditId/compare/:baselineAuditId', async (req, reply) =
       },
     },
   });
-
-  const current = audits.find((item) => item.id === params.auditId);
-  const baseline = audits.find((item) => item.id === params.baselineAuditId);
+  const current = audits.find((item: { id: string }) => item.id === params.auditId);
+  const baseline = audits.find((item: { id: string }) => item.id === params.baselineAuditId);
   if (!current || !baseline) return reply.code(404).send({ error: 'audit_not_found' });
   if (current.projectId !== baseline.projectId) {
     return reply.code(400).send({ error: 'audits_must_belong_to_same_project' });
@@ -716,16 +706,13 @@ app.get('/api/v1/audits/:auditId/compare/:baselineAuditId', async (req, reply) =
   if (current.status !== 'completed' || baseline.status !== 'completed') {
     return reply.code(409).send({ error: 'audits_must_be_completed' });
   }
-
   return compareAudits(current, baseline);
 });
-
 app.get('/api/v1/audits/:auditId/issues', async (req, reply) => {
   const params = auditIdParams.parse(req.params);
   const query = issueQuery.parse(req.query);
   const audit = await db.audit.findUnique({ where: { id: params.auditId }, select: { id: true } });
   if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
-
   const where = {
     auditId: params.auditId,
     ...(query.severity ? { severity: query.severity } : {}),
@@ -733,7 +720,6 @@ app.get('/api/v1/audits/:auditId/issues', async (req, reply) => {
     ...(query.ruleId ? { ruleId: query.ruleId } : {}),
     ...(query.pageId ? { pageId: query.pageId } : {}),
   };
-
   const [items, total] = await db.$transaction([
     db.issue.findMany({
       where,
@@ -744,22 +730,17 @@ app.get('/api/v1/audits/:auditId/issues', async (req, reply) => {
     }),
     db.issue.count({ where }),
   ]);
-
   return { items, total, limit: query.limit, offset: query.offset };
 });
-
 app.get('/api/v1/audits/:auditId/issues/summary', async (req, reply) => {
   const params = auditIdParams.parse(req.params);
-
   const audit = await db.audit.findUnique({
     where: { id: params.auditId },
     select: { id: true },
   });
-
   if (!audit) {
     return reply.code(404).send({ error: 'audit_not_found' });
   }
-
   const issues = await db.issue.findMany({
     where: { auditId: params.auditId },
     select: {
@@ -768,10 +749,8 @@ app.get('/api/v1/audits/:auditId/issues/summary', async (req, reply) => {
       category: true,
     },
   });
-
   const bySeverity: Record<string, number> = {};
   const byCategory: Record<string, number> = {};
-
   const byRule = new Map<
     string,
     {
@@ -781,14 +760,11 @@ app.get('/api/v1/audits/:auditId/issues/summary', async (req, reply) => {
       count: number;
     }
   >();
-
   for (const issue of issues) {
     bySeverity[issue.severity] = (bySeverity[issue.severity] ?? 0) + 1;
     byCategory[issue.category] = (byCategory[issue.category] ?? 0) + 1;
-
     const key = `${issue.ruleId}:${issue.severity}:${issue.category}`;
     const existing = byRule.get(key);
-
     if (existing) {
       existing.count += 1;
     } else {
@@ -800,29 +776,23 @@ app.get('/api/v1/audits/:auditId/issues/summary', async (req, reply) => {
       });
     }
   }
-
   return {
     total: issues.length,
     bySeverity,
     byCategory,
     byRule: Array.from(byRule.values()).sort((a, b) => {
       const ruleComparison = a.ruleId.localeCompare(b.ruleId);
-
       if (ruleComparison !== 0) {
         return ruleComparison;
       }
-
       const severityComparison = a.severity.localeCompare(b.severity);
-
       if (severityComparison !== 0) {
         return severityComparison;
       }
-
       return a.category.localeCompare(b.category);
     }),
   };
 });
-
 app.get('/api/v1/audits/:auditId/pages', async (req, reply) => {
   const params = auditIdParams.parse(req.params);
   const query = z
@@ -833,7 +803,6 @@ app.get('/api/v1/audits/:auditId/pages', async (req, reply) => {
     .parse(req.query);
   const audit = await db.audit.findUnique({ where: { id: params.auditId }, select: { id: true } });
   if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
-
   const where = { auditId: params.auditId };
   const [items, total] = await db.$transaction([
     db.page.findMany({
@@ -845,10 +814,8 @@ app.get('/api/v1/audits/:auditId/pages', async (req, reply) => {
     }),
     db.page.count({ where }),
   ]);
-
   return { items, total, limit: query.limit, offset: query.offset };
 });
-
 app.get('/api/v1/audits/:auditId/failures', async (req, reply) => {
   const params = auditIdParams.parse(req.params);
   const query = z
@@ -859,7 +826,6 @@ app.get('/api/v1/audits/:auditId/failures', async (req, reply) => {
     .parse(req.query);
   const audit = await db.audit.findUnique({ where: { id: params.auditId }, select: { id: true } });
   if (!audit) return reply.code(404).send({ error: 'audit_not_found' });
-
   const where = { auditId: params.auditId };
   const [items, total] = await db.$transaction([
     db.crawlFailure.findMany({
@@ -870,10 +836,8 @@ app.get('/api/v1/audits/:auditId/failures', async (req, reply) => {
     }),
     db.crawlFailure.count({ where }),
   ]);
-
   return { items, total, limit: query.limit, offset: query.offset };
 });
-
 app.get('/api/v1/pages/:pageId/issues', async (req, reply) => {
   const params = pageIdParams.parse(req.params);
   const page = await db.page.findUnique({
@@ -881,16 +845,13 @@ app.get('/api/v1/pages/:pageId/issues', async (req, reply) => {
     select: { id: true, auditId: true, url: true, finalUrl: true },
   });
   if (!page) return reply.code(404).send({ error: 'page_not_found' });
-
   const issues = await db.issue.findMany({
     where: { pageId: page.id },
     orderBy: [{ severity: 'asc' }, { ruleId: 'asc' }, { id: 'asc' }],
   });
   return { page, issues };
 });
-
 const projectIdParams = z.object({ projectId: z.string().min(1) });
-
 function nextScheduleRun(
   frequency: string,
   hourUtc: number,
@@ -912,7 +873,6 @@ function nextScheduleRun(
   }
   return next;
 }
-
 async function enqueueAudit(projectId: string, trigger: 'manual' | 'scheduled' = 'manual') {
   const project = await db.project.findUnique({ where: { id: projectId } });
   if (!project) return null;
@@ -928,7 +888,6 @@ async function enqueueAudit(projectId: string, trigger: 'manual' | 'scheduled' =
   );
   return audit;
 }
-
 app.get('/api/v1/projects/:projectId/platform', async (req, reply) => {
   const { projectId } = projectIdParams.parse(req.params);
   const project = await db.project.findUnique({
@@ -971,7 +930,6 @@ app.get('/api/v1/projects/:projectId/platform', async (req, reply) => {
   }
   return { project, schedule: project.schedule, audits, latest, previous, regression };
 });
-
 app.put('/api/v1/projects/:projectId/schedule', async (req, reply) => {
   const { projectId } = projectIdParams.parse(req.params);
   const body = z
@@ -994,7 +952,6 @@ app.put('/api/v1/projects/:projectId/schedule', async (req, reply) => {
     update: { ...body, nextRunAt },
   });
 });
-
 app.patch('/api/v1/projects/:projectId', async (req, reply) => {
   const { projectId } = projectIdParams.parse(req.params);
   const body = z.object({ retentionDays: z.number().int().min(7).max(3650) }).parse(req.body);
@@ -1004,7 +961,6 @@ app.patch('/api/v1/projects/:projectId', async (req, reply) => {
     return reply.code(404).send({ error: 'project_not_found' });
   }
 });
-
 app.delete('/api/v1/projects/:projectId', async (req, reply) => {
   const { projectId } = projectIdParams.parse(req.params);
   try {
@@ -1014,7 +970,6 @@ app.delete('/api/v1/projects/:projectId', async (req, reply) => {
     return reply.code(404).send({ error: 'project_not_found' });
   }
 });
-
 app.post('/api/v1/audits/:auditId/cancel', async (req, reply) => {
   const { auditId } = auditIdParams.parse(req.params);
   const audit = await db.audit.findUnique({ where: { id: auditId } });
@@ -1031,7 +986,6 @@ app.post('/api/v1/audits/:auditId/cancel', async (req, reply) => {
   }
   return db.audit.update({ where: { id: auditId }, data: { cancelRequested: true } });
 });
-
 app.delete('/api/v1/audits/:auditId', async (req, reply) => {
   const { auditId } = auditIdParams.parse(req.params);
   const audit = await db.audit.findUnique({ where: { id: auditId } });
@@ -1041,7 +995,6 @@ app.delete('/api/v1/audits/:auditId', async (req, reply) => {
   await db.audit.delete({ where: { id: auditId } });
   return reply.code(204).send();
 });
-
 async function runPlatformMaintenance() {
   const now = new Date();
   const due = await db.auditSchedule.findMany({
@@ -1081,8 +1034,17 @@ async function runPlatformMaintenance() {
     });
   }
 }
-
-setInterval(() => runPlatformMaintenance().catch((error) => app.log.error(error)), 60_000).unref();
-runPlatformMaintenance().catch((error) => app.log.error(error));
-
-await app.listen({ port: Number(process.env.API_PORT ?? 4000), host: '0.0.0.0' });
+// Export the Fastify instance for HTTP request-injection integration tests.
+// Tests set NODE_ENV=test to prevent listening and background maintenance.
+export { app };
+if (process.env.NODE_ENV !== 'test') {
+  setInterval(
+    () => runPlatformMaintenance().catch((error) => app.log.error(error)),
+    60_000,
+  ).unref();
+  runPlatformMaintenance().catch((error) => app.log.error(error));
+  await app.listen({
+    port: Number(process.env.API_PORT ?? 4000),
+    host: '0.0.0.0',
+  });
+}
