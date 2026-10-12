@@ -41,3 +41,67 @@ test('v0.8.1 mapping rejects external pages and non-content slugs', async () => 
   assert.equal(wordpressContentCandidate('https://example.com/', 'https://example.com').supported, false);
   assert.deepEqual(wordpressContentCandidate('https://example.com/product/beef-chews/', 'https://example.com').candidates, ['posts', 'pages', 'product']);
 });
+
+test('WordPress configuration requires HTTPS except for explicitly allowed staging', () => {
+  const previous = {
+    enabled: process.env.WORDPRESS_INTEGRATIONS_ENABLED,
+    sites: process.env.WORDPRESS_PROJECT_SITES,
+    staging: process.env.WORDPRESS_STAGING_HTTP_ENABLED,
+  };
+
+  const stagingOrigin = 'http://seo-auditor-wp-test-wordpress-1';
+  const configure = (projectUrl, siteUrl = projectUrl) => {
+    process.env.WORDPRESS_PROJECT_SITES = JSON.stringify({
+      [projectUrl]: { enabled: true, siteUrl },
+    });
+  };
+
+  try {
+    process.env.WORDPRESS_INTEGRATIONS_ENABLED = 'true';
+    delete process.env.WORDPRESS_STAGING_HTTP_ENABLED;
+
+    configure('https://example.com', 'https://example.com/');
+    assert.equal(wordpressConfig('https://example.com'), 'https://example.com');
+
+    configure('http://example.com', 'http://example.com/');
+    assert.throws(
+      () => wordpressConfig('http://example.com'),
+      /wordpress_site_origin_mismatch/,
+    );
+
+    configure(stagingOrigin, `${stagingOrigin}/`);
+    assert.throws(
+      () => wordpressConfig(stagingOrigin),
+      /wordpress_site_origin_mismatch/,
+    );
+
+    process.env.WORDPRESS_STAGING_HTTP_ENABLED = 'true';
+    assert.equal(wordpressConfig(stagingOrigin), stagingOrigin);
+
+    configure('http://another-wordpress-container', 'http://another-wordpress-container/');
+    assert.throws(
+      () => wordpressConfig('http://another-wordpress-container'),
+      /wordpress_site_origin_mismatch/,
+    );
+
+    configure(stagingOrigin, 'http://another-wordpress-container/');
+    assert.throws(
+      () => wordpressConfig(stagingOrigin),
+      /wordpress_site_origin_mismatch/,
+    );
+
+    configure(stagingOrigin, 'http://user:password@seo-auditor-wp-test-wordpress-1/');
+    assert.throws(
+      () => wordpressConfig(stagingOrigin),
+      /wordpress_site_origin_mismatch/,
+    );
+  } finally {
+    const restore = (key, value) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    };
+    restore('WORDPRESS_INTEGRATIONS_ENABLED', previous.enabled);
+    restore('WORDPRESS_PROJECT_SITES', previous.sites);
+    restore('WORDPRESS_STAGING_HTTP_ENABLED', previous.staging);
+  }
+});
