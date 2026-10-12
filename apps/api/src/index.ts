@@ -24,7 +24,12 @@ import {
 import { timingSafeEqual } from 'node:crypto';
 const app = Fastify({ logger: true });
 const config = loadConfig();
-const queue = makeAuditQueue(config.REDIS_URL);
+// Initialise Redis only when an audit is actually queued or cancelled.
+// Importing the Fastify app for request-injection tests must not open sockets.
+let queue: ReturnType<typeof makeAuditQueue> | undefined;
+function auditQueue(): ReturnType<typeof makeAuditQueue> {
+  return (queue ??= makeAuditQueue(config.REDIS_URL));
+}
 app.get('/health', async () => ({
   status: 'ok',
   version: process.env.npm_package_version ?? 'unknown',
@@ -881,7 +886,7 @@ async function enqueueAudit(projectId: string, trigger: 'manual' | 'scheduled' =
   });
   if (active) return active;
   const audit = await db.audit.create({ data: { projectId, trigger } });
-  await queue.add(
+  await auditQueue().add(
     'crawl',
     { auditId: audit.id, projectId, startUrl: project.baseUrl, maxUrls: config.CRAWLER_MAX_URLS },
     { jobId: audit.id },
@@ -977,7 +982,7 @@ app.post('/api/v1/audits/:auditId/cancel', async (req, reply) => {
   if (!['queued', 'running'].includes(audit.status))
     return reply.code(409).send({ error: 'audit_not_active' });
   if (audit.status === 'queued') {
-    const job = await queue.getJob(auditId);
+    const job = await auditQueue().getJob(auditId);
     await job?.remove();
     return db.audit.update({
       where: { id: auditId },
