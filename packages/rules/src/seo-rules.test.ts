@@ -136,8 +136,15 @@ test('reports meta description length thresholds only when a description exists'
   assert.ok(
     findingFor(basePage({ metaDescription: 'x'.repeat(161) }), 'description.too-long'),
   );
-  const missing = evaluatePage(basePage({ metaDescription: null }));
-  assert.ok(missing.some((item) => item.ruleId === 'description.missing'));
+  const page = basePage({ metaDescription: null });
+  const missing = evaluatePage(page);
+  const missingDescription = missing.find((item) => item.ruleId === 'description.missing');
+  assert.ok(missingDescription);
+  assert.deepEqual(missingDescription.evidence, {
+    url: page.finalUrl,
+    metaDescriptionFound: false,
+    metaDescription: null,
+  });
   assert.ok(!missing.some((item) => item.ruleId === 'description.too-short'));
 });
 
