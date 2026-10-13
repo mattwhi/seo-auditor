@@ -1,6 +1,6 @@
 {
   "name": "@seo-auditor/worker",
-  "version": "0.7.0-dev.0",
+  "version": "0.8.5-rc.1",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
