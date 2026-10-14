@@ -167,7 +167,16 @@ export const coreRules: readonly SeoRule[] = Object.freeze([
     category: 'metadata',
     remediation: { supported: true, risk: 'low', mode: 'approval', platforms: ['wordpress', 'woocommerce', 'rank-math', 'yoast', 'aioseo'], action: 'seo:update_description' },
     evaluate(page) {
-      return !isIndexableHtmlCandidate(page) || page.metaDescription ? [] : [finding(this)];
+      if (!isIndexableHtmlCandidate(page) || page.metaDescription) return [];
+      return [
+        finding(this, {
+          evidence: {
+            url: page.finalUrl,
+            metaDescriptionFound: false,
+            metaDescription: null,
+          },
+        }),
+      ];
     },
   },
   {

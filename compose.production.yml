@@ -1,0 +1,33 @@
+# Production security overlay. Add LAST in the Compose -f chain.
+services:
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${SEO_AUDITOR_DB_PASSWORD:?Set the production PostgreSQL password}
+
+  redis:
+    ports: !reset []
+
+  api:
+    ports: !override
+      - '127.0.0.1:4012:4000'
+    environment:
+      REMEDIATION_WRITES_ENABLED: 'false'
+      DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
+
+  worker:
+    environment:
+      DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
+
+  web:
+    ports: !override
+      - '127.0.0.1:3012:3000'
+    environment:
+      DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
+      SEO_AUDITOR_DASHBOARD_USER: ${SEO_AUDITOR_DASHBOARD_USER:?Set a dashboard username}
+      SEO_AUDITOR_DASHBOARD_PASSWORD: ${SEO_AUDITOR_DASHBOARD_PASSWORD:?Set a random password of at least 24 characters}
+
+  migrate:
+    environment:
+      DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
+    command: ['pnpm', '--filter', '@seo-auditor/database', 'exec', 'prisma', 'migrate', 'deploy']
