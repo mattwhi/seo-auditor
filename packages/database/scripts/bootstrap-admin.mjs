@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+import console from 'node:console';
 import { PrismaClient } from '@prisma/client';
 import { randomBytes, scryptSync } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';

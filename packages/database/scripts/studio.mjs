@@ -1,3 +1,5 @@
+import console from 'node:console';
+import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
