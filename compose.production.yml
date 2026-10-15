@@ -1,4 +1,11 @@
-# Production security overlay. Add LAST in the Compose -f chain.
+
+# Production security overlay.
+# Add LAST in the Docker Compose -f chain.
+
+x-production-image: &production-image
+  image: ${SEO_AUDITOR_IMAGE:?Set SEO_AUDITOR_IMAGE to the published GHCR image}
+  build: !reset null
+
 services:
   postgres:
     ports: !reset []
@@ -9,23 +16,39 @@ services:
     ports: !reset []
 
   api:
+    <<: *production-image
     ports: !override
       - '127.0.0.1:4012:4000'
     environment:
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
+      REMEDIATION_WRITES_ENABLED: 'false'
+      SEO_AUDITOR_SECRET_DIR: /app/.runtime/secrets
+    volumes:
+      - ./.runtime/secrets:/app/.runtime/secrets
 
   worker:
+    <<: *production-image
     environment:
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
 
   web:
-    environment:
+    <<: *production-image
     ports: !override
-      - '127.0.0.1:3012:3000'
+      - '10.10.20.171:3012:3000'
     environment:
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
+      SEO_AUDITOR_DASHBOARD_USER: ${SEO_AUDITOR_DASHBOARD_USER:?Set a dashboard username}
+      SEO_AUDITOR_DASHBOARD_PASSWORD: ${SEO_AUDITOR_DASHBOARD_PASSWORD:?Set a dashboard password}
 
   migrate:
+    <<: *production-image
     environment:
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
-    command: ['pnpm', '--filter', '@seo-auditor/database', 'exec', 'prisma', 'migrate', 'deploy']
+    command:
+      - pnpm
+      - --filter
+      - '@seo-auditor/database'
+      - exec
+      - prisma
+      - migrate
+      - deploy
