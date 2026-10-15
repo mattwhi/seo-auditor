@@ -42,15 +42,12 @@ services:
 
   api:
     build: .
-    volumes:
-      - wordpress_secrets:/var/lib/seo-auditor/secrets
+    env_file:
+      - .env
     environment:
-      SEO_AUDITOR_SECRET_DIR: /var/lib/seo-auditor/secrets
       DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
       REDIS_URL: redis://redis:6379
       SERVICE_NAME: api
-    env_file:
-      - .env
     command: ['pnpm', '--filter', '@seo-auditor/api', 'start']
     ports:
       - '4000:4000'
@@ -68,9 +65,6 @@ services:
       DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
       REDIS_URL: redis://redis:6379
       SERVICE_NAME: worker
-      PERFORMANCE_ENABLED: ${PERFORMANCE_ENABLED:-false}
-      PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
-      PERFORMANCE_MAX_PAGES: ${PERFORMANCE_MAX_PAGES:-4}
     command: ['pnpm', '--filter', '@seo-auditor/worker', 'start']
     depends_on:
       migrate:
@@ -80,13 +74,10 @@ services:
 
   web:
     build: .
-    volumes:
-      - wordpress_secrets:/var/lib/seo-auditor/secrets
-    environment:
-      SEO_AUDITOR_SECRET_DIR: /var/lib/seo-auditor/secrets
-      API_INTERNAL_URL: http://api:4000
     env_file:
       - .env
+    environment:
+      API_INTERNAL_URL: http://api:4000
     command: ['pnpm', '--filter', '@seo-auditor/web', 'start']
     ports:
       - '3000:3000'
@@ -97,4 +88,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  wordpress_secrets:
