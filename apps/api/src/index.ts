@@ -1,12 +1,11 @@
 import Fastify from 'fastify';
 import { createHash } from 'node:crypto';
-import { executionAuthorized, writesEnabled } from './remediation-security.js';
 import { z } from 'zod';
-import { db } from '@seo-auditor/database';
+import { db, getApplicationSettings } from '@seo-auditor/database';
 import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
-import { googleStatus, searchConsoleReport, analyticsReport } from './google.js';
+import { googleStatusForProject, searchConsoleReport, analyticsReport } from './google.js';
 import {
   proposalExecutionError,
   preflightExecutionError,
@@ -17,11 +16,10 @@ import {
   remediationPreview,
   wordpressConnectionStatus,
   wordpressIssueMapping,
-  wordpressConfig,
+  wordpressConfigForProject,
   wordpressSeoSnapshot,
   wordpressSeoWrite,
 } from './wordpress.js';
-import { timingSafeEqual } from 'node:crypto';
 const app = Fastify({ logger: true });
 const config = loadConfig();
 // Initialise Redis only when an audit is actually queued or cancelled.
@@ -60,7 +58,7 @@ app.get('/api/v1/projects/:projectId/google/status', async (req, reply) => {
   const project = await googleProject(projectId);
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   try {
-    return googleStatus(project.baseUrl);
+    return await googleStatusForProject(project.baseUrl);
   } catch {
     return reply.code(500).send({ error: 'google_configuration_invalid' });
   }
@@ -104,8 +102,14 @@ app.get('/api/v1/projects/:projectId/wordpress/connection', async (req, reply) =
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   try {
     return await wordpressConnectionStatus(project.baseUrl);
-  } catch {
-    return reply.code(409).send({ error: 'wordpress_connection_configuration_invalid' });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'unknown_wordpress_connection_error';
+
+    req.log.error({ code }, 'WordPress connection status failed');
+
+    return reply.code(409).send({
+      error: 'wordpress_connection_configuration_invalid',
+    });
   }
 });
 app.get('/api/v1/audits/:auditId/wordpress/issue-mapping', async (req, reply) => {
@@ -148,14 +152,21 @@ app.get('/api/v1/audits/:auditId/wordpress/remediation-preview', async (req, rep
     return reply.code(409).send({ error: 'issue_page_outside_project' });
   }
 });
-// v0.8.2: API-only operator gate. No browser-held token, no WordPress mutations.
-// Never log or return the bearer token. Set REMEDIATION_OPERATOR_TOKEN only on API.
-function operatorAuthorized(authorization: string | undefined): boolean {
-  const expected = process.env.REMEDIATION_OPERATOR_TOKEN;
-  if (!expected || expected.length < 32 || !authorization?.startsWith('Bearer ')) return false;
-  const received = Buffer.from(authorization.slice(7), 'utf8');
-  const secret = Buffer.from(expected, 'utf8');
-  return received.length === secret.length && timingSafeEqual(received, secret);
+// API independently validates the same revocable database session as Next.js.
+// The raw session is forwarded only server-to-server, never stored or logged.
+async function remediationActor(authorization: string | undefined) {
+  const match = /^Bearer ([a-f0-9]{64})$/.exec(authorization ?? '');
+  if (!match) return null;
+  const tokenHash = createHash('sha256').update(match[1]).digest('hex');
+  const session = await db.dashboardSession.findUnique({
+    where: { tokenHash },
+    include: { user: true },
+  });
+  if (!session || session.expiresAt <= new Date() || session.user.disabled) return null;
+  return session.user;
+}
+async function operatorAuthorized(authorization: string | undefined): Promise<boolean> {
+  return (await remediationActor(authorization))?.role === 'ADMIN';
 }
 const proposalInput = z
   .object({
@@ -177,7 +188,7 @@ const allowedProposalRules = new Set([
   'description.too-long',
 ]);
 app.get('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization))
+  if (!(await operatorAuthorized(req.headers.authorization)))
     return reply.code(401).send({ error: 'operator_unauthorized' });
   const parsed = proposalRead.safeParse(req.params);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_project' });
@@ -188,7 +199,7 @@ app.get('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) =>
   });
 });
 app.post('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization))
+  if (!(await operatorAuthorized(req.headers.authorization)))
     return reply.code(401).send({ error: 'operator_unauthorized' });
   const projectParams = proposalRead.safeParse(req.params);
   const input = proposalInput.safeParse(req.body);
@@ -197,7 +208,7 @@ app.post('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) =
   const project = await db.project.findUnique({ where: { id: projectParams.data.projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
   try {
-    if (!wordpressConfig(project.baseUrl))
+    if (!(await wordpressConfigForProject(project.baseUrl)))
       return reply.code(409).send({ error: 'wordpress_not_enabled' });
   } catch {
     return reply.code(409).send({ error: 'wordpress_configuration_invalid' });
@@ -246,7 +257,7 @@ app.post('/api/v1/projects/:projectId/wordpress/proposals', async (req, reply) =
 // plugin-owned metadata and must be rechecked by a future execution adapter.
 const preflightParams = z.object({ proposalId: z.string().min(1) });
 app.post('/api/v1/wordpress/proposals/:proposalId/preflight', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization))
+  if (!(await operatorAuthorized(req.headers.authorization)))
     return reply.code(401).send({ error: 'operator_unauthorized' });
   const parsed = preflightParams.safeParse(req.params);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
@@ -319,11 +330,19 @@ app.post('/api/v1/wordpress/proposals/:proposalId/preflight', async (req, reply)
       { code: error instanceof Error ? error.message : 'wordpress_preflight_failed' },
       'WordPress preflight failed',
     );
-    return reply.code(502).send({ error: 'wordpress_preflight_failed', executable: false });
+    return reply
+      .code(502)
+      .send({
+        error:
+          error instanceof Error && /^wordpress_[a-z0-9_]+$/.test(error.message)
+            ? error.message
+            : 'wordpress_preflight_failed',
+        executable: false,
+      });
   }
 });
 app.get('/api/v1/wordpress/proposals/:proposalId/preflights', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization))
+  if (!(await operatorAuthorized(req.headers.authorization)))
     return reply.code(401).send({ error: 'operator_unauthorized' });
   const parsed = preflightParams.safeParse(req.params);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
@@ -352,7 +371,7 @@ const snapshotDigest = (targetType: string, targetId: number, field: string, val
     .update(JSON.stringify({ type: targetType, id: targetId, field, value }))
     .digest('hex');
 app.get('/api/v1/wordpress/proposals/:proposalId/execution', async (req, reply) => {
-  if (!operatorAuthorized(req.headers.authorization))
+  if (!(await operatorAuthorized(req.headers.authorization)))
     return reply.code(401).send({ error: 'operator_unauthorized' });
   const parsed = proposalId.safeParse(req.params);
   if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
@@ -362,7 +381,7 @@ app.get('/api/v1/wordpress/proposals/:proposalId/execution', async (req, reply) 
   return record ?? reply.code(404).send({ error: 'execution_not_found' });
 });
 app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) => {
-  if (!executionAuthorized(req.headers.authorization))
+  if (!(await operatorAuthorized(req.headers.authorization)))
     return reply.code(401).send({ error: 'execution_unauthorized' });
   const parsed = proposalId.safeParse(req.params);
   const input = executionInput.safeParse(req.body);
@@ -374,7 +393,10 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
   if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
   const project = await db.project.findUnique({ where: { id: proposal.projectId } });
   if (!project) return reply.code(404).send({ error: 'project_not_found' });
-  if (!writesEnabled(project.baseUrl)) return reply.code(403).send({ error: 'execution_disabled' });
+  if (
+    !(await db.wordPressWritePolicy.findUnique({ where: { projectId: project.id } }))?.enabled
+  )
+    return reply.code(403).send({ error: 'execution_disabled' });
   const approvalError = proposalExecutionError(proposal.status);
   if (approvalError) return reply.code(409).send({ error: approvalError });
   const preflight = await db.remediationPreflight.findUnique({
@@ -482,7 +504,7 @@ app.post('/api/v1/wordpress/proposals/:proposalId/execute', async (req, reply) =
   }
 });
 app.post('/api/v1/wordpress/proposals/:proposalId/rollback', async (req, reply) => {
-  if (!executionAuthorized(req.headers.authorization))
+  if (!(await operatorAuthorized(req.headers.authorization)))
     return reply.code(401).send({ error: 'execution_unauthorized' });
   const parsed = proposalId.safeParse(req.params);
   const input = rollbackInput.safeParse(req.body);
@@ -493,7 +515,10 @@ app.post('/api/v1/wordpress/proposals/:proposalId/rollback', async (req, reply) 
   });
   if (!proposal) return reply.code(404).send({ error: 'proposal_not_found' });
   const project = await db.project.findUnique({ where: { id: proposal.projectId } });
-  if (!project || !writesEnabled(project.baseUrl))
+  if (
+    !project ||
+    !(await db.wordPressWritePolicy.findUnique({ where: { projectId: project.id } }))?.enabled
+  )
     return reply.code(403).send({ error: 'execution_disabled' });
   const execution = await db.remediationExecution.findUnique({
     where: { proposalId: proposal.id },
@@ -566,7 +591,7 @@ app.post('/api/v1/wordpress/proposals/:proposalId/rollback', async (req, reply) 
 });
 for (const decision of ['approve', 'reject'] as const) {
   app.post(`/api/v1/wordpress/proposals/:proposalId/${decision}`, async (req, reply) => {
-    if (!operatorAuthorized(req.headers.authorization))
+    if (!(await operatorAuthorized(req.headers.authorization)))
       return reply.code(401).send({ error: 'operator_unauthorized' });
     const parsed = proposalId.safeParse(req.params);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_proposal_id' });
@@ -885,10 +910,16 @@ async function enqueueAudit(projectId: string, trigger: 'manual' | 'scheduled' =
     where: { projectId, status: { in: ['queued', 'running'] } },
   });
   if (active) return active;
+  const settings = await getApplicationSettings();
   const audit = await db.audit.create({ data: { projectId, trigger } });
   await auditQueue().add(
     'crawl',
-    { auditId: audit.id, projectId, startUrl: project.baseUrl, maxUrls: config.CRAWLER_MAX_URLS },
+    {
+      auditId: audit.id,
+      projectId,
+      startUrl: project.baseUrl,
+      maxUrls: Math.min(config.CRAWLER_MAX_URLS, settings['crawler.maxUrls']),
+    },
     { jobId: audit.id },
   );
   return audit;

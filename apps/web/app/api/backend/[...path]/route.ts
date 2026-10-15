@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { canMutate, currentUser, sameOrigin } from '../../../../lib/auth';
 
 const API_BASE_URL = process.env.API_INTERNAL_URL ?? 'http://localhost:4000';
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  const user = await currentUser(request);
+  if (!user) return NextResponse.json({ error: 'login_required' }, { status: 401 });
+  if (!['GET', 'HEAD'].includes(request.method) && !sameOrigin(request)) return NextResponse.json({ error: 'invalid_origin' }, { status: 403 });
+  if (!['GET', 'HEAD'].includes(request.method) && !canMutate(user.role)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   const { path } = await context.params;
   // Operator endpoints must never be reached through the unauthenticated general proxy.
   if (path.some((segment) => ['proposals', 'preflights', 'preflight', 'execute', 'rollback', 'execution'].includes(segment))) {
@@ -33,3 +38,6 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
 
 export const GET = proxy;
 export const POST = proxy;
+export const PUT = proxy;
+export const PATCH = proxy;
+export const DELETE = proxy;

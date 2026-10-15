@@ -314,7 +314,7 @@ export default function Home() {
               <p>WordPress routes: <strong>{wordpressStatus.wordpress ? 'Detected' : 'Not detected'}</strong> · WooCommerce routes: <strong>{wordpressStatus.wooCommerce ? 'Detected' : 'Not detected'}</strong></p>
               {wordpressStatus.siteUrl && <p>Site: {wordpressStatus.siteUrl}</p>}
               {wordpressStatus.error && <p role="alert">Discovery issue: {wordpressStatus.error}</p>}
-              {!wordpressStatus.enabled && <p>To enable, configure WORDPRESS_INTEGRATIONS_ENABLED and WORDPRESS_PROJECT_SITES on the API container.</p>}
+              {!wordpressStatus.enabled && <p>To enable WordPress, open Administration → Integrations & secrets, enable the project connection and save your credentials.</p>}
               {wordpressStatus.namespaces.length > 0 && <details><summary>Detected REST namespaces ({wordpressStatus.namespaces.length})</summary><p>{wordpressStatus.namespaces.join(' · ')}</p></details>}
               <h3>Authenticated connection (read-only)</h3>
               {wordpressConnection ? <p>Application Password: <strong>{wordpressConnection.configured ? 'Configured' : 'Not configured'}</strong> · Authentication: <strong>{wordpressConnection.authenticated ? 'Verified' : 'Not verified'}</strong>{wordpressConnection.reason ? ` · ${wordpressConnection.reason}` : ''}</p> : <p>Checking connection…</p>}
@@ -338,7 +338,7 @@ export default function Home() {
           </section>}
           {view === 'performance' && <section className="panel">
             <div className="section-title"><div><span className="eyebrow">V0.6 · PERFORMANCE</span><h2>PageSpeed Insights</h2><p>Representative page sampling · mobile and desktop Lighthouse lab data · CrUX field data where available. Independent of technical SEO score.</p></div></div>
-            {!performance.length && <p>No performance measurements for this audit. Enable PERFORMANCE_ENABLED=true on the worker and run a new audit.</p>}
+            {!performance.length && <p>No performance measurements for this audit. Check Admin → Settings and deployment PageSpeed permissions, then run a new audit.</p>}
             {performance.length > 0 && <>
               <div className="metrics" style={{ marginBottom: 16 }}>
                 <article><span>Measured pages</span><strong>{new Set(performance.map((r) => r.url)).size}</strong></article>

@@ -16,6 +16,7 @@ model Project {
 
   audits   Audit[]
   schedule AuditSchedule?
+  integration ProjectIntegration?
 }
 
 model Audit {
@@ -212,4 +213,109 @@ model RemediationExecution {
   rolledBackAt  DateTime?
   @@index([projectId, createdAt])
   @@index([status])
+}
+
+
+// v1.1.0-alpha.1: invitation-only dashboard accounts.
+model DashboardUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         String   @default("READ_ONLY")
+  disabled     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  sessions     DashboardSession[]
+  invitations  DashboardInvitation[] @relation("InvitedBy")
+  adminEvents  DashboardAdminEvent[] @relation("AdminActor")
+}
+
+model DashboardSession {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model DashboardInvitation {
+  id          String    @id @default(cuid())
+  email       String
+  role        String    @default("READ_ONLY")
+  tokenHash   String    @unique
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  invitedBy   DashboardUser @relation("InvitedBy", fields: [invitedById], references: [id])
+  @@index([email])
+  @@index([expiresAt])
+}
+
+// v1.1.0-alpha.2: immutable administration audit history.
+model DashboardAdminEvent {
+  id        String   @id @default(cuid())
+  actorId   String
+  action    String
+  targetId  String
+  details   Json?
+  createdAt DateTime @default(now())
+  archivedAt DateTime?
+  actor     DashboardUser @relation("AdminActor", fields: [actorId], references: [id], onDelete: Restrict)
+  @@index([createdAt])
+  @@index([targetId, createdAt])
+  @@index([archivedAt, createdAt])
+}
+
+
+/// v1.1.0-beta.1: administrator-controlled, default-deny WordPress write policy.
+/// Infrastructure REMEDIATION_WRITES_ENABLED and origin allowlist remain mandatory.
+model WordPressWritePolicy {
+  projectId String @id
+  enabled Boolean @default(false)
+  updatedById String
+  updatedAt DateTime @updatedAt
+  @@index([enabled])
+}
+
+/// Administrator-managed operational settings. Values are bounded and audited.
+model ApplicationSetting {
+  key String @id
+  value Json
+  updatedById String
+  updatedAt DateTime @updatedAt
+}
+
+/// Non-secret integration mappings. Credentials remain mounted in API containers.
+model ProjectIntegration {
+  projectId String @id
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  wordpressEnabled Boolean @default(false)
+  wordpressSiteUrl String?
+  searchConsoleSiteUrl String?
+  ga4PropertyId String?
+  updatedById String
+  updatedAt DateTime @updatedAt
+}
+
+/// AES-256-GCM encrypted per-project WordPress Application Password.
+/// Key is supplied at runtime; never persisted in the database.
+model WordPressCredential {
+  projectId String @id
+  username String
+  encryptedPassword String @db.Text
+  updatedById String
+  updatedAt DateTime @updatedAt
+}
+
+/// Encrypted per-project Google service account. Never return JSON/private key to clients.
+model GoogleCredential {
+  projectId String @id
+  encryptedJson String @db.Text
+  accountEmail String
+  updatedById String
+  updatedAt DateTime @updatedAt
 }

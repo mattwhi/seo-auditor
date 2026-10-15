@@ -12,6 +12,7 @@ coverage/
 .env
 .env.*
 !.env.example
+!.env.*.example
 
 # Logs
 *.log
@@ -36,3 +37,10 @@ yarn-error.log*
 tmp/
 temp/
 .cache/
+
+# Private keys
+*.pem
+*.key
+
+# Runtime secrets and local data
+.runtime/

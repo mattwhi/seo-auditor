@@ -12,7 +12,6 @@ services:
     ports: !override
       - '127.0.0.1:4012:4000'
     environment:
-      REMEDIATION_WRITES_ENABLED: 'false'
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
 
   worker:
@@ -20,12 +19,11 @@ services:
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
 
   web:
+    environment:
     ports: !override
       - '127.0.0.1:3012:3000'
     environment:
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
-      SEO_AUDITOR_DASHBOARD_USER: ${SEO_AUDITOR_DASHBOARD_USER:?Set a dashboard username}
-      SEO_AUDITOR_DASHBOARD_PASSWORD: ${SEO_AUDITOR_DASHBOARD_PASSWORD:?Set a random password of at least 24 characters}
 
   migrate:
     environment:
