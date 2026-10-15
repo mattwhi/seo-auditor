@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import './styles.css';
+import AppNavigation from './components/AppNavigation';
 
 export const metadata: Metadata = {
   title: {
@@ -17,7 +18,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body><AppNavigation />{children}</body>
     </html>
   );
 }

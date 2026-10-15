@@ -3,7 +3,7 @@ import { Worker } from 'bullmq';
 
 import { loadConfig } from '@seo-auditor/config';
 import { crawlSite } from '@seo-auditor/crawler';
-import { db } from '@seo-auditor/database';
+import { db, getApplicationSettings } from '@seo-auditor/database';
 import { AUDIT_QUEUE } from '@seo-auditor/queue';
 import { evaluateAudit, evaluatePage } from '@seo-auditor/rules';
 import { score } from '@seo-auditor/scoring';
@@ -24,6 +24,7 @@ new Worker<CrawlJob>(
       },
     });
 
+    const settings = await getApplicationSettings();
     const findings: RuleFinding[] = [];
     let pageCount = 0;
 
@@ -38,14 +39,14 @@ new Worker<CrawlJob>(
       ]);
       await crawlSite(job.data.startUrl, {
         maxUrls: job.data.maxUrls,
-        concurrency: config.CRAWLER_PAGE_CONCURRENCY,
-        minDelayMs: config.CRAWLER_MIN_DELAY_MS,
-        maxRetries: config.CRAWLER_MAX_RETRIES,
+        concurrency: Math.min(config.CRAWLER_PAGE_CONCURRENCY, settings['crawler.pageConcurrency']),
+        minDelayMs: Math.max(config.CRAWLER_MIN_DELAY_MS, settings['crawler.minDelayMs']),
+        maxRetries: Math.min(config.CRAWLER_MAX_RETRIES, settings['crawler.maxRetries']),
         retryBaseDelayMs: config.CRAWLER_RETRY_BASE_DELAY_MS,
         retryMaxDelayMs: config.CRAWLER_RETRY_MAX_DELAY_MS,
         maxRedirects: config.CRAWLER_MAX_REDIRECTS,
         userAgent: config.CRAWLER_USER_AGENT,
-        timeoutMs: config.CRAWLER_REQUEST_TIMEOUT_MS,
+        timeoutMs: Math.min(config.CRAWLER_REQUEST_TIMEOUT_MS, settings['crawler.requestTimeoutMs']),
 
         onFailure: async (failure) => {
           await db.crawlFailure.create({
@@ -169,8 +170,8 @@ new Worker<CrawlJob>(
 
       // Representative deterministic sampling: homepage, category, product, article.
       // Failures are persisted per target and never fail the technical SEO audit.
-      if (process.env.PERFORMANCE_ENABLED === 'true') {
-        const maxPages = Math.min(4, Math.max(1, Number(process.env.PERFORMANCE_MAX_PAGES || '4') || 4));
+      if (process.env.PERFORMANCE_ENABLED === 'true' && settings['performance.enabled']) {
+        const maxPages = Math.min(4, Math.max(1, settings['performance.maxPages']), Math.max(1, Number(process.env.PERFORMANCE_MAX_PAGES || '4') || 4));
         const targets = selectPerformanceTargets(job.data.startUrl, persistedPages, maxPages);
         for (const target of targets) {
           for (const strategy of ['mobile', 'desktop'] as const) {
@@ -224,3 +225,22 @@ new Worker<CrawlJob>(
     concurrency: config.CRAWLER_CONCURRENCY,
   },
 );
+
+// Retention policy: archive administrative activity after 30 days, never delete.
+// Safe with multiple workers: updateMany only affects rows not already archived.
+const archiveOldAdminEvents = async () => {
+  try {
+    const settings = await getApplicationSettings();
+    if (!settings['activity.autoArchive']) return;
+    const cutoff = new Date(Date.now() - settings['activity.retentionDays'] * 24 * 60 * 60 * 1000);
+    const result = await db.dashboardAdminEvent.updateMany({
+      where: { archivedAt: null, createdAt: { lt: cutoff } },
+      data: { archivedAt: new Date() },
+    });
+    if (result.count) console.info('admin_activity_archived', { count: result.count });
+  } catch (err) {
+    console.error('admin_activity_archive_failed', err instanceof Error ? err.message : 'unknown');
+  }
+};
+void archiveOldAdminEvents();
+setInterval(() => void archiveOldAdminEvents(), 24 * 60 * 60 * 1000).unref();

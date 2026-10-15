@@ -2,10 +2,39 @@
 /**
  * Plugin Name: SEO Auditor Metadata Bridge
  * Description: Narrow, authenticated Rank Math metadata read and compare-and-swap updates for SEO Auditor.
- * Version: 0.8.4
+ * Version: 0.8.5
  * Requires PHP: 8.0
  */
 if (!defined('ABSPATH')) { exit; }
+// Write permission is controlled by a WordPress administrator, not by editing wp-config.php.
+// Existing constant-based installations remain supported during migration.
+function seo_auditor_bridge_writes_enabled() {
+    return get_option('seo_auditor_bridge_writes_enabled', '0') === '1'
+        || (defined('SEO_AUDITOR_BRIDGE_WRITES_ENABLED') && SEO_AUDITOR_BRIDGE_WRITES_ENABLED === true);
+}
+add_action('admin_menu', static function () {
+    add_options_page('SEO Auditor Bridge', 'SEO Auditor Bridge', 'manage_options', 'seo-auditor-bridge', 'seo_auditor_bridge_settings_page');
+});
+function seo_auditor_bridge_settings_page() {
+    if (!current_user_can('manage_options')) { wp_die('Not authorised'); }
+    if (isset($_POST['seo_auditor_save'])) {
+        check_admin_referer('seo_auditor_bridge_save');
+        update_option('seo_auditor_bridge_writes_enabled', isset($_POST['seo_auditor_allow_writes']) ? '1' : '0', false);
+        echo '<div class="notice notice-success"><p>SEO Auditor bridge settings saved.</p></div>';
+    }
+    $enabled = seo_auditor_bridge_writes_enabled();
+    echo '<div class="wrap"><h1>SEO Auditor Metadata Bridge</h1>';
+    echo '<p>Authenticated reads are enabled. Writes require a WordPress administrator account, SEO Auditor project approval and a matching preflight snapshot.</p>';
+    echo '<form method="post">';
+    wp_nonce_field('seo_auditor_bridge_save');
+    echo '<label><input type="checkbox" name="seo_auditor_allow_writes" value="1" '.checked($enabled, true, false).'> Allow approved Rank Math title and description writes</label>';
+    echo '<p class="description">This permits live changes from authenticated administrators. Keep disabled until you are ready to test.</p>';
+    if (defined('SEO_AUDITOR_BRIDGE_WRITES_ENABLED') && SEO_AUDITOR_BRIDGE_WRITES_ENABLED === true) {
+        echo '<p><strong>Note:</strong> Legacy wp-config.php constant currently enables writes independently of this checkbox.</p>';
+    }
+    echo '<p><button type="submit" name="seo_auditor_save" value="1" class="button button-primary">Save changes</button></p></form></div>';
+}
+
 add_action('rest_api_init', static function () {
     $namespace = 'seo-auditor/v1';
     $permission = static function ($request) {
@@ -43,7 +72,7 @@ add_action('rest_api_init', static function () {
           'permission_callback' => static function ($request) use ($permission) {
               $allowed = $permission($request);
               if (is_wp_error($allowed)) { return $allowed; }
-              if (!current_user_can('manage_options') || !defined('SEO_AUDITOR_BRIDGE_WRITES_ENABLED') || SEO_AUDITOR_BRIDGE_WRITES_ENABLED !== true) {
+              if (!current_user_can('manage_options') || !seo_auditor_bridge_writes_enabled()) {
                   return new WP_Error('writes_disabled', 'Bridge writes disabled', ['status' => 403]);
               }
               return true;

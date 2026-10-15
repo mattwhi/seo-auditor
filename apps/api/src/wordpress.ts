@@ -1,37 +1,17 @@
 /** v0.8 WordPress/WooCommerce discovery and non-mutating remediation planning.
  * Deliberately no write endpoints: API has no user authentication yet.
  */
-import { z } from 'zod';
-import { readFileSync } from 'node:fs';
+import { db } from '@seo-auditor/database';
+import { decryptWordPressPassword } from './wordpress-crypto.js';
 
-const mappingSchema = z.record(
-  z.string(),
-  z.object({ siteUrl: z.string().url(), enabled: z.boolean().default(false) }),
-);
-export function wordpressConfig(baseUrl: string) {
-  const entries = mappingSchema.parse(JSON.parse(process.env.WORDPRESS_PROJECT_SITES ?? '{}'));
-  const normalize = (s: string) => new URL(s).origin.toLowerCase();
-  const config = Object.entries(entries).find(
-    ([key]) => normalize(key) === normalize(baseUrl),
-  )?.[1];
-  if (!config?.enabled || process.env.WORDPRESS_INTEGRATIONS_ENABLED !== 'true') return null;
+export async function wordpressConfigForProject(baseUrl: string): Promise<string | null> {
+  const mapping = await db.projectIntegration.findFirst({ where: { project: { baseUrl } } });
+  if (!mapping) return null;
+  // Project-scoped settings are managed exclusively by the administrator UI.
+  if (!mapping.wordpressEnabled) return null;
+  const site = new URL(mapping.wordpressSiteUrl ?? '');
   const project = new URL(baseUrl);
-  const site = new URL(config.siteUrl);
-  const stagingHttpAllowed =
-    process.env.WORDPRESS_STAGING_HTTP_ENABLED === 'true' &&
-    site.origin === 'http://seo-auditor-wp-test-wordpress-1';
-
-  if (
-    (!stagingHttpAllowed && site.protocol !== 'https:') ||
-    site.origin !== project.origin ||
-    site.username ||
-    site.password ||
-    site.search ||
-    site.hash ||
-    site.pathname !== '/'
-  ) {
-    throw new Error('wordpress_site_origin_mismatch');
-  }
+  if (site.protocol !== 'https:' || site.origin !== project.origin || site.pathname !== '/' || site.search || site.hash || site.username || site.password) throw new Error('wordpress_site_origin_mismatch');
   return site.origin;
 }
 
@@ -46,7 +26,7 @@ export type WordpressDiscovery = {
 };
 
 export async function discoverWordpress(baseUrl: string): Promise<WordpressDiscovery> {
-  const siteUrl = wordpressConfig(baseUrl);
+  const siteUrl = await wordpressConfigForProject(baseUrl);
   if (!siteUrl)
     return { enabled: false, restApi: false, wordpress: false, wooCommerce: false, namespaces: [] };
   try {
@@ -165,52 +145,21 @@ export function remediationPreview(ruleId: string, pageUrl: string, baseUrl: str
   };
 }
 
-/** v0.8.1: private, file-backed WordPress Application Password connection.
- * The API does not have operator authentication: these endpoints are strictly
- * read-only and return no WordPress account details or secret material.
- */
-const connectionSchema = z.record(
-  z.string(),
-  z.object({
-    username: z.string().min(1),
-    applicationPassword: z.string().min(1),
-  }),
-);
-
+/** WordPress Application Passwords are stored only as encrypted project credentials. */
 type WordPressConnection = { username: string; applicationPassword: string };
-export function wordpressConnection(baseUrl: string): WordPressConnection | null {
-  const siteUrl = wordpressConfig(baseUrl);
+export async function wordpressConnection(baseUrl: string): Promise<WordPressConnection | null> {
+  const siteUrl = await wordpressConfigForProject(baseUrl);
   if (!siteUrl) return null;
-  const file = process.env.WORDPRESS_CONNECTIONS_FILE;
-  if (!file) return null;
-  let raw: string;
-  try {
-    raw = readFileSync(file, 'utf8');
-  } catch {
-    throw new Error('wordpress_connections_file_unreadable');
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error('wordpress_connections_invalid');
-  }
-  const entries = connectionSchema.safeParse(parsed);
-  if (!entries.success) throw new Error('wordpress_connections_invalid');
-  const match = Object.entries(entries.data).find(([key]) => {
-    try {
-      return new URL(key).origin === siteUrl && new URL(key).pathname === '/';
-    } catch {
-      return false;
-    }
-  });
-  return match?.[1] ?? null;
+  const project = await db.project.findFirst({ where: { baseUrl }, select: { id: true } });
+  if (!project) return null;
+  const saved = await db.wordPressCredential.findUnique({ where: { projectId: project.id } });
+  return saved ? { username: saved.username, applicationPassword: decryptWordPressPassword(saved.encryptedPassword) } : null;
 }
 
 async function wordpressRead(baseUrl: string, route: string): Promise<Response> {
-  const site = wordpressConfig(baseUrl);
+  const site = await wordpressConfigForProject(baseUrl);
   if (!site) throw new Error('wordpress_not_enabled');
-  const connection = wordpressConnection(baseUrl);
+  const connection = await wordpressConnection(baseUrl);
   if (!connection) throw new Error('wordpress_connection_not_configured');
   // Fixed REST routes only; never accept arbitrary URLs or redirects.
   if (!route.startsWith('/wp-json/wp/v2/')) throw new Error('wordpress_invalid_route');
@@ -224,7 +173,7 @@ async function wordpressRead(baseUrl: string, route: string): Promise<Response> 
 }
 
 export async function wordpressConnectionStatus(baseUrl: string) {
-  const site = wordpressConfig(baseUrl);
+  const site = await wordpressConfigForProject(baseUrl);
   if (!site)
     return {
       enabled: false,
@@ -232,20 +181,8 @@ export async function wordpressConnectionStatus(baseUrl: string) {
       authenticated: false,
       reason: 'wordpress_not_enabled',
     };
-  if (!process.env.WORDPRESS_CONNECTIONS_FILE)
-    return {
-      enabled: true,
-      configured: false,
-      authenticated: false,
-      reason: 'wordpress_connection_not_configured',
-    };
-  if (!wordpressConnection(baseUrl))
-    return {
-      enabled: true,
-      configured: false,
-      authenticated: false,
-      reason: 'wordpress_connection_not_configured',
-    };
+  if (!await wordpressConnection(baseUrl))
+    return { enabled: true, configured: false, authenticated: false, reason: 'wordpress_connection_not_configured' };
   try {
     const response = await wordpressRead(baseUrl, '/wp-json/wp/v2/users/me?context=edit');
     return {
@@ -284,6 +221,20 @@ export function wordpressContentCandidate(pageUrl: string, baseUrl: string) {
   return { supported: true, slug, candidates: ['posts', 'pages', 'product'] };
 }
 
+/** Public read-only ID lookup; no application credentials needed. */
+async function wordpressPublicRead(baseUrl: string, route: string): Promise<Response> {
+  const site = await wordpressConfigForProject(baseUrl);
+  if (!site) throw new Error('wordpress_not_enabled');
+  if (!/^\/wp-json\/wp\/v2\/(posts|pages|product)\?/.test(route))
+    throw new Error('wordpress_invalid_route');
+  return fetch(`${site}${route}`, {
+    method: 'GET',
+    headers: { accept: 'application/json' },
+    redirect: 'error',
+    signal: AbortSignal.timeout(12_000),
+  });
+}
+
 /** Resolve a public-facing audited URL to a WordPress REST object.
  * No content or credentials are returned. Ambiguous matches require manual review.
  */
@@ -293,7 +244,7 @@ export async function wordpressIssueMapping(baseUrl: string, pageUrl: string) {
     return { status: 'manual_review', reason: candidate.reason, matches: [] };
   const matches: Array<{ type: string; id: number; link: string }> = [];
   for (const type of candidate.candidates) {
-    const response = await wordpressRead(
+    const response = await wordpressPublicRead(
       baseUrl,
       `/wp-json/wp/v2/${type}?slug=${encodeURIComponent(candidate.slug)}&_fields=id,link&per_page=10`,
     );
@@ -334,8 +285,8 @@ async function bridgeRequest(
   field: string,
   payload?: { expectedValue: string; newValue: string },
 ): Promise<Response> {
-  const site = wordpressConfig(baseUrl);
-  const connection = wordpressConnection(baseUrl);
+  const site = await wordpressConfigForProject(baseUrl);
+  const connection = await wordpressConnection(baseUrl);
   if (!site || !connection) throw new Error('wordpress_connection_not_configured');
   if (
     !['posts', 'pages', 'product'].includes(targetType) ||

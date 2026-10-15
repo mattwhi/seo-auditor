@@ -1,0 +1,22 @@
+
+/* Remediation actions and confirmation dialog */
+.remediation-workspace .remediation-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:10px 17px;border:1px solid transparent;border-radius:10px;font:inherit;font-size:13px;font-weight:700;line-height:1.25;cursor:pointer;transition:background .15s,border-color .15s,transform .15s}
+.remediation-workspace .remediation-btn:hover:not(:disabled){transform:translateY(-1px)}
+.remediation-workspace .remediation-btn:focus-visible{outline:3px solid #38bdf8;outline-offset:3px}
+.remediation-workspace .remediation-btn:disabled{opacity:.5;cursor:not-allowed}
+.remediation-btn-primary{background:#0284c7;color:white!important;border-color:#0369a1!important}
+.remediation-btn-primary:hover:not(:disabled){background:#0369a1}
+.remediation-btn-secondary{background:#17263a;color:#e2e8f0!important;border-color:#42536b!important}
+.remediation-btn-secondary:hover:not(:disabled){background:#243650}
+.remediation-btn-danger{background:#7f1d1d;color:#fff!important;border-color:#991b1b!important}
+.remediation-btn-danger:hover:not(:disabled){background:#991b1b}
+.remediation-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.remediation-modal-backdrop{position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,.78);display:flex;align-items:center;justify-content:center;padding:20px}
+.remediation-modal{width:min(620px,100%);max-height:90vh;overflow:auto;background:#111c2c;border:1px solid #475569;box-shadow:0 25px 70px #0009;border-radius:16px;padding:26px;color:#f1f5f9}
+.remediation-modal h3{font-size:21px;margin:0 0 12px}
+.remediation-modal p{margin:12px 0;color:#cbd5e1;line-height:1.55}
+.remediation-modal p strong{color:#fff;margin-right:8px}
+.remediation-modal .remediation-value{background:#0b1320;border-color:#334155;color:#e2e8f0;max-height:120px;overflow:auto}
+.remediation-modal-url{display:block;overflow-wrap:anywhere;color:#7dd3fc;margin-top:4px}
+.remediation-modal .remediation-actions{justify-content:flex-end;margin:24px 0 0}
+@media(max-width:600px){.remediation-modal{padding:18px}.remediation-modal .remediation-actions>*{flex:1}}
