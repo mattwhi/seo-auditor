@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { registerAiRoutes } from './ai-routes.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { db, getApplicationSettings } from '@seo-auditor/database';
@@ -168,11 +169,12 @@ async function remediationActor(authorization: string | undefined) {
 async function operatorAuthorized(authorization: string | undefined): Promise<boolean> {
   return (await remediationActor(authorization))?.role === 'ADMIN';
 }
+registerAiRoutes(app, operatorAuthorized, remediationActor);
 const proposalInput = z
   .object({
     auditId: z.string().min(1),
     issueId: z.string().min(1),
-    targetType: z.enum(['posts', 'pages', 'product']),
+    targetType: z.enum(['posts', 'pages', 'product', 'product_cat']),
     targetId: z.number().int().positive(),
     proposedText: z.string().trim().min(3).max(500),
   })

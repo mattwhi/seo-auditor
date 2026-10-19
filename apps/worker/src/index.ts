@@ -1,3 +1,4 @@
+import { runAutomaticAi } from './ai-auto.js';
 import { measurePageSpeed, failedMeasurement, selectPerformanceTargets } from './performance.js';
 import { Worker } from 'bullmq';
 
@@ -203,6 +204,9 @@ new Worker<CrawlJob>(
           score: score(findings, pageCount),
         },
       });
+      // Advisory AI is best-effort; failures never change a successful audit.
+      try { await runAutomaticAi(job.data.auditId, job.data.projectId); }
+      catch (error) { console.warn('automatic_ai_unavailable', error instanceof Error ? error.message : 'unknown'); }
     } catch (error) {
       const cancelled = error instanceof Error && error.message === 'AUDIT_CANCELLED';
       await db.audit.update({

@@ -49,6 +49,33 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Validate deployment script
+        run: |
+          set -euo pipefail
+          bash -n deploy-ghcr.sh
+
+      - name: Validate Compose configuration
+        run: |
+          set -euo pipefail
+
+          printf '%s\n' \
+            'DATABASE_URL=postgresql://seo:seo@postgres:5432/seo_auditor' \
+            'POSTGRES_USER=seo' \
+            'POSTGRES_PASSWORD=seo' \
+            'POSTGRES_DB=seo_auditor' \
+            'REDIS_URL=redis://redis:6379' \
+            'WORDPRESS_CREDENTIAL_ENCRYPTION_KEY=ci-validation-only-not-for-production' \
+            > .env
+
+          trap 'rm -f .env' EXIT
+
+          docker compose \
+            -f docker-compose.yml \
+            config --quiet
+
+          grep -q 'SEO_AUDITOR_SECRET_DIR' compose.production.yml
+          grep -Fq '.runtime/secrets:/app/.runtime/secrets' compose.production.yml
+
   publish:
     name: Build and publish Docker image
     needs: validate
@@ -81,7 +108,7 @@ jobs:
           tags: ghcr.io/mattwhi/seo-auditor:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-    
+
   deploy:
     name: Deploy SEO Auditor
     needs: publish
@@ -98,6 +125,9 @@ jobs:
       contents: read
 
     steps:
+      - name: Checkout deployment configuration
+        uses: actions/checkout@v4
+
       - name: Configure SSH
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -113,6 +143,73 @@ jobs:
 
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
+
+      - name: Validate deployment files
+        run: |
+          set -euo pipefail
+
+          test -s deploy-ghcr.sh
+          test -s compose.production.yml
+          test -s docker-compose.yml
+
+          bash -n deploy-ghcr.sh
+
+          grep -q -- '--env-file .env.production' deploy-ghcr.sh
+          grep -q -- '-f compose.production.yml' deploy-ghcr.sh
+
+          echo "Deployment files validated."
+
+      - name: Upload deployment configuration
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+
+          scp \
+            -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            -P "$DEPLOY_PORT" \
+            deploy-ghcr.sh \
+            compose.production.yml \
+            docker-compose.yml \
+            "$DEPLOY_USER@$DEPLOY_HOST:/opt/seo-auditor/"
+
+      - name: Validate production VM configuration
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            -p "$DEPLOY_PORT" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/seo-auditor
+
+          bash -n deploy-ghcr.sh
+
+          test -s .env.production
+          test -s .runtime/secrets/wordpress-credential.key
+
+          chmod 700 deploy-ghcr.sh
+          chmod 700 .runtime/secrets
+
+          echo "Production deployment script validated."
+          echo "Persistent encryption key exists."
+          echo "Production environment file exists."
+          REMOTE
 
       - name: Deploy validated image
         env:
@@ -131,3 +228,8 @@ jobs:
             -p "$DEPLOY_PORT" \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "/opt/seo-auditor/deploy-ghcr.sh sha-$COMMIT_SHA"
+
+      - name: Deployment completed
+        run: |
+          echo "SEO Auditor deployment completed."
+          echo "Image: ghcr.io/mattwhi/seo-auditor:sha-${{ github.sha }}"

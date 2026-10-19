@@ -42,15 +42,12 @@ services:
 
   api:
     build: .
-    volumes:
-      - wordpress_secrets:/var/lib/seo-auditor/secrets
+    env_file:
+      - .env
     environment:
-      SEO_AUDITOR_SECRET_DIR: /var/lib/seo-auditor/secrets
       DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
       REDIS_URL: redis://redis:6379
       SERVICE_NAME: api
-    env_file:
-      - .env
     command: ['pnpm', '--filter', '@seo-auditor/api', 'start']
     ports:
       - '4000:4000'
@@ -68,9 +65,6 @@ services:
       DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
       REDIS_URL: redis://redis:6379
       SERVICE_NAME: worker
-      PERFORMANCE_ENABLED: ${PERFORMANCE_ENABLED:-false}
-      PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
-      PERFORMANCE_MAX_PAGES: ${PERFORMANCE_MAX_PAGES:-4}
     command: ['pnpm', '--filter', '@seo-auditor/worker', 'start']
     depends_on:
       migrate:
@@ -80,13 +74,10 @@ services:
 
   web:
     build: .
-    volumes:
-      - wordpress_secrets:/var/lib/seo-auditor/secrets
-    environment:
-      SEO_AUDITOR_SECRET_DIR: /var/lib/seo-auditor/secrets
-      API_INTERNAL_URL: http://api:4000
     env_file:
       - .env
+    environment:
+      API_INTERNAL_URL: http://api:4000
     command: ['pnpm', '--filter', '@seo-auditor/web', 'start']
     ports:
       - '3000:3000'
@@ -95,105 +86,5 @@ services:
         condition: service_started
 
 volumes:
-  postgres_data:
-  redis_data:
-services:
-  postgres:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: seo
-      POSTGRES_PASSWORD: seo
-      POSTGRES_DB: seo_auditor
-    ports:
-      - '5433:5432'
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U seo -d seo_auditor']
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:8-alpine
-    command: redis-server --appendonly yes
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  migrate:
-    build: .
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
-      REDIS_URL: redis://redis:6379
-    command: ['pnpm', '--filter', '@seo-auditor/database', 'exec', 'prisma', 'db', 'push']
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  api:
-    build: .
-    volumes:
-      - wordpress_secrets:/var/lib/seo-auditor/secrets
-    environment:
-      SEO_AUDITOR_SECRET_DIR: /var/lib/seo-auditor/secrets
-      DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
-      REDIS_URL: redis://redis:6379
-      SERVICE_NAME: api
-    env_file:
-      - .env
-    command: ['pnpm', '--filter', '@seo-auditor/api', 'start']
-    ports:
-      - '4000:4000'
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-
-  worker:
-    build: .
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql://seo:seo@postgres:5432/seo_auditor
-      REDIS_URL: redis://redis:6379
-      SERVICE_NAME: worker
-      PERFORMANCE_ENABLED: ${PERFORMANCE_ENABLED:-false}
-      PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
-      PERFORMANCE_MAX_PAGES: ${PERFORMANCE_MAX_PAGES:-4}
-    command: ['pnpm', '--filter', '@seo-auditor/worker', 'start']
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-
-  web:
-    build: .
-    volumes:
-      - wordpress_secrets:/var/lib/seo-auditor/secrets
-    environment:
-      SEO_AUDITOR_SECRET_DIR: /var/lib/seo-auditor/secrets
-      API_INTERNAL_URL: http://api:4000
-    env_file:
-      - .env
-    command: ['pnpm', '--filter', '@seo-auditor/web', 'start']
-    ports:
-      - '3000:3000'
-    depends_on:
-      api:
-        condition: service_started
-
-volumes:
-  wordpress_secrets:
   postgres_data:
   redis_data:

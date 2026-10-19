@@ -8,33 +8,37 @@ datasource db {
 }
 
 model Project {
-  id        String   @id @default(cuid())
-  name      String
-  baseUrl   String
+  id            String   @id @default(cuid())
+  name          String
+  baseUrl       String
   createdAt     DateTime @default(now())
   retentionDays Int      @default(90)
 
-  audits   Audit[]
-  schedule AuditSchedule?
+  audits      Audit[]
+  schedule    AuditSchedule?
   integration ProjectIntegration?
+  aiSettings  ProjectAiSettings?
+  aiAnalyses  AiAnalysis[]
+  aiReviews   AiRemediationReview[]
 }
 
 model Audit {
-  id          String    @id @default(cuid())
-  projectId   String
-  status      String    @default("queued")
-  score       Int?
-  startedAt   DateTime?
-  completedAt DateTime?
-  createdAt   DateTime  @default(now())
-  trigger     String    @default("manual")
-  cancelRequested Boolean @default(false)
+  id              String    @id @default(cuid())
+  projectId       String
+  status          String    @default("queued")
+  score           Int?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  trigger         String    @default("manual")
+  cancelRequested Boolean   @default(false)
 
-  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  pages         Page[]
-  issues        Issue[]
-  crawlFailures CrawlFailure[]
+  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  pages              Page[]
+  issues             Issue[]
+  crawlFailures      CrawlFailure[]
   performanceResults PerformanceResult[]
+  aiAnalyses         AiAnalysis[]
 
   @@index([projectId])
   @@index([projectId, createdAt])
@@ -43,7 +47,7 @@ model Audit {
 }
 
 model Page {
-  id              String  @id @default(cuid())
+  id              String   @id @default(cuid())
   auditId         String
   url             String
   finalUrl        String
@@ -60,8 +64,8 @@ model Page {
   images          Json?
   outgoingLinks   Json?
   hreflang        Json?
-  jsonLdBlocks    Int     @default(0)
-  jsonLdErrors    Int     @default(0)
+  jsonLdBlocks    Int      @default(0)
+  jsonLdErrors    Int      @default(0)
   contentHash     String?
   redirectChain   Json?
   contentType     String?
@@ -76,8 +80,9 @@ model Page {
   redirectCount   Int?
   fetchAttempts   Int?
 
-  audit  Audit   @relation(fields: [auditId], references: [id], onDelete: Cascade)
-  issues Issue[]
+  audit      Audit        @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  issues     Issue[]
+  aiAnalyses AiAnalysis[]
 
   @@unique([auditId, url])
   @@index([auditId])
@@ -106,15 +111,15 @@ model Issue {
 }
 
 model CrawlFailure {
-  id         String   @id @default(cuid())
-  auditId    String
-  url        String
-  type       String
-  message    String
-  statusCode Int?
-  attempts   Int
+  id            String   @id @default(cuid())
+  auditId       String
+  url           String
+  type          String
+  message       String
+  statusCode    Int?
+  attempts      Int
   redirectChain Json?
-  createdAt  DateTime @default(now())
+  createdAt     DateTime @default(now())
 
   audit Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
 
@@ -124,17 +129,17 @@ model CrawlFailure {
 }
 
 model AuditSchedule {
-  id        String   @id @default(cuid())
-  projectId String   @unique
-  enabled   Boolean  @default(false)
-  frequency String   @default("weekly")
-  hourUtc   Int      @default(3)
-  dayOfWeek Int?
+  id         String    @id @default(cuid())
+  projectId  String    @unique
+  enabled    Boolean   @default(false)
+  frequency  String    @default("weekly")
+  hourUtc    Int       @default(3)
+  dayOfWeek  Int?
   dayOfMonth Int?
-  nextRunAt DateTime?
-  lastRunAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  nextRunAt  DateTime?
+  lastRunAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
@@ -143,26 +148,26 @@ model AuditSchedule {
 
 // v0.6: Performance data is independent of the technical SEO score.
 model PerformanceResult {
-  id String @id @default(cuid())
-  auditId String
-  strategy String
-  pageType String @default("homepage")
-  url String
-  status String
-  measuredAt DateTime @default(now())
+  id              String   @id @default(cuid())
+  auditId         String
+  strategy        String
+  pageType        String   @default("homepage")
+  url             String
+  status          String
+  measuredAt      DateTime @default(now())
   lighthouseScore Int?
-  metrics Json
-  error String?
+  metrics         Json
+  error           String?
 
   audit Audit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
   @@unique([auditId, strategy, url])
   @@index([auditId])
 }
 
-
 /// v0.8.2 operator-reviewed remediation proposals. No live WordPress writes.
 model RemediationProposal {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   auditId      String
   issueId      String
   projectId    String
@@ -170,17 +175,17 @@ model RemediationProposal {
   ruleId       String
   targetType   String
   targetId     Int
-  proposedText String   @db.Text
-  status       String   @default("draft")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  proposedText String    @db.Text
+  status       String    @default("draft")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
   approvedAt   DateTime?
   rejectedAt   DateTime?
+
   @@index([projectId, createdAt])
   @@index([auditId, issueId])
   @@index([status])
 }
-
 
 /// v0.8.3 immutable read-only preflight history; no execution credentials or write APIs.
 model RemediationPreflight {
@@ -192,130 +197,196 @@ model RemediationPreflight {
   originalValue String   @db.Text
   conflict      Boolean  @default(false)
   createdAt     DateTime @default(now())
+
   @@index([proposalId, createdAt])
 }
 
 /// Durable execution/rollback record. Snapshots contain SEO text; keep DB access restricted.
 model RemediationExecution {
-  id            String   @id @default(cuid())
-  proposalId    String   @unique
+  id            String    @id @default(cuid())
+  proposalId    String    @unique
   preflightId   String
   projectId     String
   field         String
-  originalValue String   @db.Text
-  appliedValue  String   @db.Text
+  originalValue String    @db.Text
+  appliedValue  String    @db.Text
   snapshotHash  String
-  status        String   @default("pending")
+  status        String    @default("pending")
   errorCode     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   executedAt    DateTime?
   rolledBackAt  DateTime?
+
   @@index([projectId, createdAt])
   @@index([status])
 }
 
-
 // v1.1.0-alpha.1: invitation-only dashboard accounts.
 model DashboardUser {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String                @id @default(cuid())
+  email        String                @unique
   passwordHash String
-  role         String   @default("READ_ONLY")
-  disabled     Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  role         String                @default("READ_ONLY")
+  disabled     Boolean               @default(false)
+  createdAt    DateTime              @default(now())
   sessions     DashboardSession[]
   invitations  DashboardInvitation[] @relation("InvitedBy")
   adminEvents  DashboardAdminEvent[] @relation("AdminActor")
 }
 
 model DashboardSession {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
+  id        String        @id @default(cuid())
+  tokenHash String        @unique
   userId    String
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime      @default(now())
   user      DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([expiresAt])
 }
 
 model DashboardInvitation {
-  id          String    @id @default(cuid())
+  id          String        @id @default(cuid())
   email       String
-  role        String    @default("READ_ONLY")
-  tokenHash   String    @unique
+  role        String        @default("READ_ONLY")
+  tokenHash   String        @unique
   invitedById String
   expiresAt   DateTime
   acceptedAt  DateTime?
   revokedAt   DateTime?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime      @default(now())
   invitedBy   DashboardUser @relation("InvitedBy", fields: [invitedById], references: [id])
+
   @@index([email])
   @@index([expiresAt])
 }
 
 // v1.1.0-alpha.2: immutable administration audit history.
 model DashboardAdminEvent {
-  id        String   @id @default(cuid())
-  actorId   String
-  action    String
-  targetId  String
-  details   Json?
-  createdAt DateTime @default(now())
+  id         String        @id @default(cuid())
+  actorId    String
+  action     String
+  targetId   String
+  details    Json?
+  createdAt  DateTime      @default(now())
   archivedAt DateTime?
-  actor     DashboardUser @relation("AdminActor", fields: [actorId], references: [id], onDelete: Restrict)
+  actor      DashboardUser @relation("AdminActor", fields: [actorId], references: [id], onDelete: Restrict)
+
   @@index([createdAt])
   @@index([targetId, createdAt])
   @@index([archivedAt, createdAt])
 }
 
-
 /// v1.1.0-beta.1: administrator-controlled, default-deny WordPress write policy.
 /// Infrastructure REMEDIATION_WRITES_ENABLED and origin allowlist remain mandatory.
 model WordPressWritePolicy {
-  projectId String @id
-  enabled Boolean @default(false)
+  projectId   String   @id
+  enabled     Boolean  @default(false)
   updatedById String
-  updatedAt DateTime @updatedAt
+  updatedAt   DateTime @updatedAt
+
   @@index([enabled])
 }
 
 /// Administrator-managed operational settings. Values are bounded and audited.
 model ApplicationSetting {
-  key String @id
-  value Json
+  key         String   @id
+  value       Json
   updatedById String
-  updatedAt DateTime @updatedAt
+  updatedAt   DateTime @updatedAt
 }
 
 /// Non-secret integration mappings. Credentials remain mounted in API containers.
 model ProjectIntegration {
-  projectId String @id
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  wordpressEnabled Boolean @default(false)
-  wordpressSiteUrl String?
+  projectId            String   @id
+  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  wordpressEnabled     Boolean  @default(false)
+  wordpressSiteUrl     String?
   searchConsoleSiteUrl String?
-  ga4PropertyId String?
-  updatedById String
-  updatedAt DateTime @updatedAt
+  ga4PropertyId        String?
+  updatedById          String
+  updatedAt            DateTime @updatedAt
 }
 
 /// AES-256-GCM encrypted per-project WordPress Application Password.
 /// Key is supplied at runtime; never persisted in the database.
 model WordPressCredential {
-  projectId String @id
-  username String
-  encryptedPassword String @db.Text
-  updatedById String
-  updatedAt DateTime @updatedAt
+  projectId         String   @id
+  username          String
+  encryptedPassword String   @db.Text
+  updatedById       String
+  updatedAt         DateTime @updatedAt
 }
 
 /// Encrypted per-project Google service account. Never return JSON/private key to clients.
 model GoogleCredential {
-  projectId String @id
-  encryptedJson String @db.Text
-  accountEmail String
-  updatedById String
-  updatedAt DateTime @updatedAt
+  projectId     String   @id
+  encryptedJson String   @db.Text
+  accountEmail  String
+  updatedById   String
+  updatedAt     DateTime @updatedAt
+}
+
+// v0.9: AI is advisory only. Automatic mode is opt-in per project.
+model ProjectAiSettings {
+  projectId         String   @id
+  enabled           Boolean  @default(false)
+  mode              String   @default("manual")
+  maxPagesPerAudit  Int      @default(3)
+  maxAnalysesPerDay Int      @default(20)
+  updatedAt         DateTime @updatedAt
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model AiAnalysis {
+  id                 String                @id @default(cuid())
+  projectId          String
+  auditId            String
+  pageId             String
+  contentFingerprint String
+  trigger            String                @default("manual")
+  model              String
+  status             String                @default("running")
+  summary            String?               @db.Text
+  recommendations    Json?
+  inputTokens        Int                   @default(0)
+  outputTokens       Int                   @default(0)
+  errorCode          String?
+  createdAt          DateTime              @default(now())
+  completedAt        DateTime?
+  project            Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  audit              Audit                 @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  page               Page                  @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  reviews            AiRemediationReview[]
+
+  @@index([projectId, createdAt])
+  @@index([auditId, pageId])
+  @@index([projectId, status])
+}
+
+// v0.9.2: operator-reviewed AI suggestions. Approval never executes a live write.
+model AiRemediationReview {
+  id              String     @id @default(cuid())
+  analysisId      String
+  projectId       String
+  suggestionIndex Int
+  ruleId          String
+  field           String
+  priority        String
+  currentValue    String     @db.Text
+  proposedValue   String     @db.Text
+  explanation     String     @db.Text
+  evidence        String     @db.Text
+  status          String     @default("pending")
+  reviewerId      String?
+  reviewedAt      DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  analysis        AiAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  project         Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([analysisId, suggestionIndex])
+  @@index([projectId, status])
 }

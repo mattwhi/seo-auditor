@@ -180,3 +180,14 @@
 .remediation-workspace .remediation-actions{display:flex;gap:8px;flex-wrap:wrap}
 .remediation-workspace .remediation-create-panel input,.remediation-workspace .remediation-create-panel textarea,.remediation-workspace .remediation-create-panel select{background:#0b1728;color:#edf6ff;border:1px solid #415771;border-radius:9px;padding:10px 12px;max-width:100%;box-sizing:border-box}
 .remediation-workspace .remediation-create-panel textarea{min-height:100px;resize:vertical;line-height:1.5}
+
+/* v0.9.2.5 issue-specific AI SEO fix generator */
+.remediation-ai-fix{margin:18px 0;padding:18px;border:1px solid #38536c;border-radius:12px;background:#101e30;display:grid;gap:10px}
+.remediation-ai-fix-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.remediation-ai-fix-heading span{font-size:12px;color:#9eb8cf}
+.remediation-ai-fix .remediation-actions{margin:4px 0;flex-wrap:wrap}
+.remediation-ai-rationale{padding:13px;border:1px solid #335a6a;border-radius:10px;background:#102c39}
+.remediation-ai-rationale p{margin:8px 0;line-height:1.5}
+.remediation-ai-rationale small{color:#9ec4d0}
+.remediation-ai-accept{display:flex;align-items:center;gap:9px;margin:14px 0;color:#d8e7f3}
+.remediation-ai-accept input{width:17px;height:17px;flex-shrink:0}

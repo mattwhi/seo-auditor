@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+type FixSuggestion = { proposedValue:string; rationale:string; currentValue:string; ruleId:string };
+type IssueContext = { currentValue:string; ruleId:string; url:string; source:string };
 type Issue = { id: string; ruleId: string; severity: string; page: { finalUrl: string } | null };
 type MappingMatch = { type: string; id: number; link: string };
 type IssueMapping = { status: string; reason: string | null; matches: MappingMatch[]; executable: boolean };
@@ -29,6 +31,38 @@ export default function RemediationWorkspace({ projectId, auditId }: { projectId
   const [selectedIssue, setSelectedIssue] = useState(''); const [targetType, setTargetType] = useState('pages'); const [targetId, setTargetId] = useState(''); const [proposedText, setProposedText] = useState('');
   const [selectedProposal, setSelectedProposal] = useState(''); const [preflights, setPreflights] = useState<Preflight[]>([]); const [execution, setExecution] = useState<Execution | null>(null);
   const [filter, setFilter] = useState('all');
+  const [issueContext, setIssueContext] = useState<IssueContext | null>(null);
+  const [fixSuggestion, setFixSuggestion] = useState<FixSuggestion | null>(null);
+  const [previousSuggestions, setPreviousSuggestions] = useState<string[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [acceptedSuggestion, setAcceptedSuggestion] = useState(false);
+  const [contextLoading, setContextLoading] = useState(false);
+  useEffect(() => {
+    setIssueContext(null);setFixSuggestion(null);setPreviousSuggestions([]);setAcceptedSuggestion(false);setProposedText('');
+    if(!selectedIssue || !auditId || !projectId) return;
+    const controller=new AbortController();setContextLoading(true);
+    const url=new URL('/api/ai',window.location.origin);
+    url.searchParams.set('action','issueContext');url.searchParams.set('projectId',projectId);url.searchParams.set('auditId',auditId);url.searchParams.set('issueId',selectedIssue);
+    void fetch(url,{signal:controller.signal,cache:'no-store'}).then(async response=>{
+      const result=await response.json();if(!response.ok)throw Error(result.error||'Cannot load existing SEO value');
+      if(!controller.signal.aborted)setIssueContext(result);
+    }).catch(e=>{if(!controller.signal.aborted)setError(e instanceof Error?e.message:String(e));}).finally(()=>{if(!controller.signal.aborted)setContextLoading(false);});
+    return ()=>controller.abort();
+  },[selectedIssue,auditId,projectId]);
+  async function generateFix(shuffle=false){
+    if(!selectedIssue || generating || !issueContext)return;
+    setGenerating(true);setError('');setNotice('');setAcceptedSuggestion(false);
+    try{
+      const response=await fetch(`/api/ai?projectId=${encodeURIComponent(projectId)}&action=suggestFix`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({auditId,issueId:selectedIssue,previousSuggestions:shuffle?previousSuggestions.slice(-5):[]})});
+      const result=await response.json();if(!response.ok)throw Error(result.error||`AI request failed (${response.status})`);
+      const suggestion=result as FixSuggestion;
+      setFixSuggestion(suggestion);setProposedText(suggestion.proposedValue);
+      setPreviousSuggestions(old=>[...old,suggestion.proposedValue].slice(-5));
+      setNotice('AI suggestion generated. Review and accept it before creating a draft.');
+    }catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setGenerating(false);}
+  }
+
   const [confirmAction, setConfirmAction] = useState<'execute' | 'rollback' | 'delete' | null>(null);
   useEffect(() => { if (!confirmAction) return; const close = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) setConfirmAction(null); }; document.addEventListener('keydown', close); return () => document.removeEventListener('keydown', close); }, [confirmAction, busy]);
   const [refreshing, setRefreshing] = useState(false);
@@ -119,7 +153,7 @@ export default function RemediationWorkspace({ projectId, auditId }: { projectId
     <div className="panel remediation-create-panel"><div className="section-title"><div><span className="eyebrow">PROPOSE</span><h3>Create SEO fix</h3><p>Choose an eligible audit finding. The backend independently verifies the WordPress object mapping.</p></div></div>
       <div className="remediation-form">
         <label>Issue<select value={selectedIssue} onChange={(e) => setSelectedIssue(e.target.value)}><option value="">Select a finding</option>{issues.map((i) => <option key={i.id} value={i.id}>{i.ruleId} · {i.page?.finalUrl ?? i.id}</option>)}</select></label>
-        <label>WordPress content type<input readOnly value={targetId ? (targetType === 'pages' ? 'Page' : targetType === 'posts' ? 'Post' : 'WooCommerce product') : 'Not resolved'} /></label>
+        <label>WordPress content type<input readOnly value={targetId ? (targetType === 'pages' ? 'Page' : targetType === 'posts' ? 'Post' : targetType === 'product_cat' ? 'WooCommerce product category' : 'WooCommerce product') : 'Not resolved'} /></label>
         <label>WordPress content ID<input readOnly value={targetId} placeholder={mappingLoading ? 'Looking up ID…' : 'Select a finding'} /></label>
       </div>
       {mappingLoading && <p role="status" className="remediation-hint">Checking the WordPress REST API for an exact URL match…</p>}
@@ -133,8 +167,20 @@ export default function RemediationWorkspace({ projectId, auditId }: { projectId
             {mapping.matches.map((m) => <option key={`${m.type}:${m.id}`} value={`${m.type}:${m.id}`}>{m.type} #{m.id} — {m.link}</option>)}
           </select></label> : <p>Open the page in WordPress and check that its REST API is accessible. A manual ID cannot bypass the server's exact URL verification.</p>}
       </div>}
-      <div className="remediation-editor"><label htmlFor="proposed-seo">Proposed SEO title or description</label><textarea id="proposed-seo" rows={3} maxLength={500} value={proposedText} onChange={(e) => setProposedText(e.target.value)} placeholder="Enter a unique, accurate SEO title or description"/><div className="remediation-editor-footer"><span>{proposedText.length}/500 characters</span><span>Review wording before creating a proposal</span></div></div>
-      <button className="remediation-btn remediation-btn-primary" disabled={busy || !selectedIssue || !mappingConfirmed || mappingLoading || !Number.isInteger(Number(targetId)) || Number(targetId) <= 0 || proposedText.trim().length < 3} onClick={() => void run('create', { projectId, payload: { auditId, issueId: selectedIssue, targetType, targetId: Number(targetId), proposedText } })}>Create draft proposal</button>
+      {selectedIssue && <div className="remediation-ai-fix">
+        <div className="remediation-ai-fix-heading"><strong>Existing SEO value</strong><span>Stored crawl snapshot · not live WordPress</span></div>
+        <div className="remediation-value" aria-live="polite">{contextLoading?'Loading audited value…':issueContext?.currentValue || '(Missing or empty)'}</div>
+        <div className="remediation-editor-footer"><span>{issueContext?.currentValue.length ?? 0} characters</span><span>{issueContext?.ruleId || ''}</span></div>
+        <div className="remediation-actions">
+          <button type="button" className="remediation-btn remediation-btn-primary" disabled={generating||busy||!issueContext} onClick={()=>void generateFix(false)}>{generating?'Generating…':'✦ Generate with AI'}</button>
+          <button type="button" className="remediation-btn remediation-btn-secondary" disabled={generating||busy||!fixSuggestion} onClick={()=>void generateFix(true)}>⤨ Shuffle suggestion</button>
+        </div>
+        {fixSuggestion && <div className="remediation-ai-rationale"><strong>Why AI recommends this</strong><p>{fixSuggestion.rationale}</p><small>Generated using this page’s stored audit evidence. Verify accuracy before approval.</small></div>}
+      </div>}
+      <div className="remediation-editor"><label htmlFor="proposed-seo">Proposed SEO title or description</label><textarea id="proposed-seo" rows={3} maxLength={500} value={proposedText} onChange={(e) => {setProposedText(e.target.value);setAcceptedSuggestion(false);}} placeholder="Enter a unique, accurate SEO title or description"/><div className="remediation-editor-footer"><span>{proposedText.length}/500 characters</span><span>Review wording before creating a proposal</span></div></div>
+      {fixSuggestion && <label className="remediation-ai-accept"><input type="checkbox" checked={acceptedSuggestion} onChange={e=>setAcceptedSuggestion(e.target.checked)}/> I have reviewed this AI suggestion and approve its use in a draft proposal.</label>}
+      <button className="remediation-btn remediation-btn-primary" disabled={generating || busy || (fixSuggestion !== null && !acceptedSuggestion) || !selectedIssue || !mappingConfirmed || mappingLoading || !Number.isInteger(Number(targetId)) || Number(targetId) <= 0 || proposedText.trim().length < 3} onClick={() => void run('create', { projectId, payload: { auditId, issueId: selectedIssue, targetType, targetId: Number(targetId), proposedText } })}>Create draft proposal</button>
+      <p className="remediation-hint">AI suggestions are optional; you can still write a proposal manually. Creating a draft never publishes to WordPress.</p>
       <p className="remediation-hint">Only supported title and description findings can become proposals. Taxonomy archives and ambiguous WordPress mappings are rejected.</p>
     </div>
     <div className="panel"><div className="section-title"><div><span className="eyebrow">QUEUE</span><h3>Remediation proposals</h3></div><select aria-label="Filter proposal status" value={filter} onChange={(e) => setFilter(e.target.value)}><option value="all">All statuses</option>{Object.keys(counts).map((s) => <option key={s} value={s}>{s}</option>)}</select></div>

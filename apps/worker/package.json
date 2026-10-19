@@ -18,7 +18,8 @@
     "@seo-auditor/scoring": "workspace:*",
     "@seo-auditor/queue": "workspace:*",
     "@seo-auditor/types": "workspace:*",
-    "bullmq": "^5.61.2"
+    "bullmq": "^5.61.2",
+    "@seo-auditor/ai": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.20.6",
