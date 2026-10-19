@@ -26,6 +26,7 @@ COMPOSE=(
   -f compose.remediation.yml
   -f compose.remediation-web.yml
   -f compose.production.yml
+  -f compose.ghcr.yml
 )
 
 echo "========================================"
