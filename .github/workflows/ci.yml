@@ -54,16 +54,27 @@ jobs:
           set -euo pipefail
           bash -n deploy-ghcr.sh
 
-      - name: Validate Compose configuration
-        run: |
-          set -euo pipefail
-
-          docker compose \
-            -f docker-compose.yml \
-            config --quiet
-
-          grep -q 'SEO_AUDITOR_SECRET_DIR' compose.production.yml
-          grep -q '\.runtime/secrets:/app/\.runtime/secrets' compose.production.yml
+          - name: Validate Compose configuration
+          run: |
+            set -euo pipefail
+        
+            printf '%s\n' \
+              'DATABASE_URL=postgresql://seo:seo@postgres:5432/seo_auditor' \
+              'POSTGRES_USER=seo' \
+              'POSTGRES_PASSWORD=seo' \
+              'POSTGRES_DB=seo_auditor' \
+              'REDIS_URL=redis://redis:6379' \
+              'WORDPRESS_CREDENTIAL_ENCRYPTION_KEY=ci-validation-only-not-for-production' \
+              > .env
+        
+            trap 'rm -f .env' EXIT
+        
+            docker compose \
+              -f docker-compose.yml \
+              config --quiet
+        
+            grep -q 'SEO_AUDITOR_SECRET_DIR' compose.production.yml
+            grep -q '\.runtime/secrets:/app/\.runtime/secrets' compose.production.yml
 
   publish:
     name: Build and publish Docker image
