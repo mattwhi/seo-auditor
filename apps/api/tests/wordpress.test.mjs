@@ -40,3 +40,10 @@ test('WordPress mapping rejects HTTP sites unless the specific staging host is o
     else process.env.WORDPRESS_STAGING_HTTP_ENABLED = previous;
   }
 });
+
+
+test('product category archives are resolved only as taxonomy terms', () => {
+  const candidate = wordpressContentCandidate('https://example.com/product-category/lamb/', 'https://example.com');
+  assert.deepEqual(candidate.candidates, ['product_cat']);
+  assert.equal(candidate.slug, 'lamb');
+});

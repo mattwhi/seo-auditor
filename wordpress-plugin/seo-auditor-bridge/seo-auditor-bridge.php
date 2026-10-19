@@ -2,7 +2,7 @@
 /**
  * Plugin Name: SEO Auditor Metadata Bridge
  * Description: Narrow, authenticated Rank Math metadata read and compare-and-swap updates for SEO Auditor.
- * Version: 0.8.5
+ * Version: 0.9.3.1
  * Requires PHP: 8.0
  */
 if (!defined('ABSPATH')) { exit; }
@@ -40,6 +40,16 @@ add_action('rest_api_init', static function () {
     $permission = static function ($request) {
         $type = $request['type'];
         $id = absint($request['id']);
+        if ($type === 'product_cat') {
+            $term = get_term($id, 'product_cat');
+            if (!$term || is_wp_error($term) || $term->taxonomy !== 'product_cat') {
+                return new WP_Error('target_not_found', 'Invalid product category', ['status' => 404]);
+            }
+            if (!current_user_can('edit_term', $id)) {
+                return new WP_Error('forbidden', 'Not authorised to edit this category', ['status' => 403]);
+            }
+            return true;
+        }
         $post = get_post($id);
         $types = ['posts' => 'post', 'pages' => 'page', 'product' => 'product'];
         if (!$post || !isset($types[$type]) || $post->post_type !== $types[$type]) {
@@ -59,13 +69,13 @@ add_action('rest_api_init', static function () {
         if (!defined('RANK_MATH_VERSION')) {
             return new WP_Error('rank_math_unavailable', 'Rank Math is not active', ['status' => 409]);
         }
-        $value = get_post_meta($id, $field, true);
+        $value = $request['type'] === 'product_cat' ? get_term_meta($id, $field, true) : get_post_meta($id, $field, true);
         if (!is_string($value)) {
             return new WP_Error('invalid_metadata', 'Metadata must be text', ['status' => 409]);
         }
         return ['type' => $request['type'], 'id' => $id, 'field' => $field, 'value' => $value, 'adapter' => 'rank_math_bridge_v1'];
     };
-    register_rest_route($namespace, '/meta/(?P<type>posts|pages|product)/(?P<id>[1-9][0-9]*)', [
+    register_rest_route($namespace, '/meta/(?P<type>posts|pages|product|product_cat)/(?P<id>[1-9][0-9]*)', [
         [ 'methods' => WP_REST_Server::READABLE, 'permission_callback' => $permission,
           'args' => ['field' => ['required' => true, 'type' => 'string']], 'callback' => $snapshot ],
         [ 'methods' => WP_REST_Server::CREATABLE,
@@ -98,11 +108,12 @@ add_action('rest_api_init', static function () {
                   $field = $request->get_param('field');
                   // Existing meta is replaced only if the exact previous value matches.
                   // An absent key must be handled explicitly rather than overwriting it blindly.
-                  if (metadata_exists('post', $id, $field)) {
-                      $changed = update_post_meta($id, $field, wp_slash($new), $expected);
+                  $meta_type = $request['type'] === 'product_cat' ? 'term' : 'post';
+                  if (metadata_exists($meta_type, $id, $field)) {
+                      $changed = update_metadata($meta_type, $id, $field, wp_slash($new), $expected);
                   } else {
                       if ($expected !== '') { return new WP_Error('metadata_conflict', 'Metadata was removed', ['status' => 409]); }
-                      $changed = add_post_meta($id, $field, wp_slash($new), true);
+                      $changed = add_metadata($meta_type, $id, $field, wp_slash($new), true);
                   }
                   if (!$changed) { return new WP_Error('metadata_write_failed', 'Update not confirmed', ['status' => 409]); }
               }

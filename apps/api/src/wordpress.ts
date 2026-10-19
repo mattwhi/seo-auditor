@@ -218,14 +218,14 @@ export function wordpressContentCandidate(pageUrl: string, baseUrl: string) {
   const slug = segments.at(-1) ?? '';
   if (!slug || !/^[a-z0-9][a-z0-9-]{0,199}$/i.test(slug))
     return { supported: false, reason: 'slug_not_mappable' };
-  return { supported: true, slug, candidates: ['posts', 'pages', 'product'] };
+  return { supported: true, slug, candidates: /^\/product-category\/[^/]+\/?$/.test(page.pathname) ? ['product_cat'] : ['posts', 'pages', 'product'] };
 }
 
 /** Public read-only ID lookup; no application credentials needed. */
 async function wordpressPublicRead(baseUrl: string, route: string): Promise<Response> {
   const site = await wordpressConfigForProject(baseUrl);
   if (!site) throw new Error('wordpress_not_enabled');
-  if (!/^\/wp-json\/wp\/v2\/(posts|pages|product)\?/.test(route))
+  if (!/^\/wp-json\/wp\/v2\/(posts|pages|product|product_cat)\?/.test(route))
     throw new Error('wordpress_invalid_route');
   return fetch(`${site}${route}`, {
     method: 'GET',
@@ -289,7 +289,7 @@ async function bridgeRequest(
   const connection = await wordpressConnection(baseUrl);
   if (!site || !connection) throw new Error('wordpress_connection_not_configured');
   if (
-    !['posts', 'pages', 'product'].includes(targetType) ||
+    !['posts', 'pages', 'product', 'product_cat'].includes(targetType) ||
     !Number.isSafeInteger(targetId) ||
     targetId < 1
   )

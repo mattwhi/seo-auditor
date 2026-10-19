@@ -15,15 +15,17 @@ services:
       REMEDIATION_WRITES_ENABLED: 'false'
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
       SEO_AUDITOR_SECRET_DIR: /app/.runtime/secrets
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
     volumes:
       - ./.runtime/secrets:/app/.runtime/secrets
   worker:
     environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       DATABASE_URL: ${SEO_AUDITOR_PRODUCTION_DATABASE_URL:?Set the production database connection URL}
 
   web:
-    image: ghcr.io/mattwhi/seo-auditor:sha-115eec74995fa7f5b1ae8d54112521d90491a8d3
-    build: !reset null
     ports: !override
       - '10.10.20.171:3012:3000'
     environment:

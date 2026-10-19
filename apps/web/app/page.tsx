@@ -1,6 +1,6 @@
 'use client';
 
-import RemediationWorkspace from './components/RemediationWorkspace';
+import RemediationCentre from './components/RemediationCentre';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 type Project = { id: string; name: string; baseUrl: string; createdAt: string };
@@ -322,7 +322,7 @@ export default function Home() {
               <h3>Remediation workflow</h3><p>SEO findings remain separate from WordPress changes. The Remediation tab provides protected proposal approval, preflight, execution history and separately gated execution and rollback.</p>
             </>}
           </section>}
-          {view === 'remediation' && selectedProject && selectedAudit && <RemediationWorkspace projectId={selectedProject} auditId={selectedAudit} />}
+          {view === 'remediation' && selectedProject && selectedAudit && <RemediationCentre projectId={selectedProject} auditId={selectedAudit} pages={pages} />}
           {view === 'google' && <section className="panel">
             <div className="section-title"><div><span className="eyebrow">v0.7 · GOOGLE INTEGRATIONS</span><h2>Search Console &amp; Analytics</h2><p>Read-only Google reports. Last 28 complete days, ending three days ago. Separate from the SEO score.</p></div><button onClick={() => void loadGoogleReports()} disabled={googleBusy}>{googleBusy ? 'Loading…' : 'Refresh'}</button></div>
             {googleError && <p role="alert">{googleError}</p>}
