@@ -21,6 +21,8 @@ type Safeguards = {
 };
 export default function IntegrationsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [googleJson, setGoogleJson] = useState<Record<string, string>>({});
   const [credentials, setCredentials] = useState<
     Record<string, { username: string; applicationPassword: string }>
@@ -38,6 +40,7 @@ export default function IntegrationsPage() {
     }
     const data = (await response.json()) as { projects: Project[]; safeguards: Safeguards };
     setProjects(data.projects);
+    setSelectedProjectId((previous) => data.projects.some((p) => p.id === previous) ? previous : (data.projects[0]?.id ?? ''));
     setSafeguards(data.safeguards);
   }, []);
   useEffect(() => {
@@ -227,6 +230,24 @@ export default function IntegrationsPage() {
       setBusy('');
     }
   }
+  async function deleteProject(project: Project) {
+    if (deleteConfirmation !== project.name) return;
+    setBusy(`${project.id}:delete`);
+    setError('');
+    try {
+      const response = await fetch('/api/admin/projects', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, confirmName: deleteConfirmation }),
+      });
+      const data = await response.json();
+      if (!response.ok) { setError(data.error ?? 'Unable to delete project'); return; }
+      setDeleteConfirmation('');
+      setMessage(`Deleted project ${project.name}.`);
+      await load();
+    } catch { setError('Unable to contact project management service'); }
+    finally { setBusy(''); }
+  }
   return (
     <main className="admin-page">
       <div className="admin-heading">
@@ -273,7 +294,17 @@ export default function IntegrationsPage() {
           </p>
         </div>
       </section>
-      {projects.map((project) => (
+      <nav aria-label="Select project integrations" role="tablist" style={{ display: 'flex', gap: 8, overflowX: 'auto', padding: '12px 0', marginBottom: 12 }}>
+        {projects.map((project) => (
+          <button key={project.id} type="button" role="tab" aria-selected={selectedProjectId === project.id}
+            className={selectedProjectId === project.id ? 'admin-primary' : 'admin-card'}
+            style={{ flexShrink: 0, cursor: 'pointer', padding: '10px 16px', borderRadius: 8 }}
+            onClick={() => { setSelectedProjectId(project.id); setDeleteConfirmation(''); setError(''); setMessage(''); }}>
+            {project.name || project.baseUrl}
+          </button>
+        ))}
+      </nav>
+      {projects.filter((project) => project.id === selectedProjectId).map((project) => (
         <section key={project.id} className="admin-card admin-integrations-card">
           <div className="admin-card-heading">
             <div>
@@ -517,6 +548,18 @@ export default function IntegrationsPage() {
                 onClick={() => void save(project)}
               >
                 {busy === project.id ? 'Saving…' : 'Save integrations'}
+              </button>
+            </div>
+            <div style={{ marginTop: 28, borderTop: '1px solid #64748b', paddingTop: 20 }}>
+              <h3>Delete project</h3>
+              <p className="admin-muted">Permanently deletes this project and its saved audit history. It does not change the connected website. This cannot be undone.</p>
+              <label htmlFor={`delete-${project.id}`}>Type <strong>{project.name}</strong> to confirm</label>
+              <input id={`delete-${project.id}`} type="text" value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)} autoComplete="off" />
+              <button type="button" disabled={busy !== '' || deleteConfirmation !== project.name}
+                style={{ marginLeft: 10, background: '#a52834', color: 'white', padding: '9px 14px', borderRadius: 6 }}
+                onClick={() => void deleteProject(project)}>
+                {busy === `${project.id}:delete` ? 'Deleting…' : 'Permanently delete project'}
               </button>
             </div>
           </div>
