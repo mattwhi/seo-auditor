@@ -153,7 +153,7 @@ export default function RemediationWorkspace({ projectId, auditId }: { projectId
     <div className="panel remediation-create-panel"><div className="section-title"><div><span className="eyebrow">PROPOSE</span><h3>Create SEO fix</h3><p>Choose an eligible audit finding. The backend independently verifies the WordPress object mapping.</p></div></div>
       <div className="remediation-form">
         <label>Issue<select value={selectedIssue} onChange={(e) => setSelectedIssue(e.target.value)}><option value="">Select a finding</option>{issues.map((i) => <option key={i.id} value={i.id}>{i.ruleId} · {i.page?.finalUrl ?? i.id}</option>)}</select></label>
-        <label>WordPress content type<input readOnly value={targetId ? (targetType === 'pages' ? 'Page' : targetType === 'posts' ? 'Post' : targetType === 'product_cat' ? 'WooCommerce product category' : 'WooCommerce product') : 'Not resolved'} /></label>
+        <label>WordPress content type<input readOnly value={targetId ? (targetType === 'pages' ? 'Page' : targetType === 'posts' ? 'Post' : targetType === 'product_cat' ? 'WooCommerce product category' : targetType === 'category' ? 'WordPress category' : 'WooCommerce product') : 'Not resolved'} /></label>
         <label>WordPress content ID<input readOnly value={targetId} placeholder={mappingLoading ? 'Looking up ID…' : 'Select a finding'} /></label>
       </div>
       {mappingLoading && <p role="status" className="remediation-hint">Checking the WordPress REST API for an exact URL match…</p>}

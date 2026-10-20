@@ -218,14 +218,20 @@ export function wordpressContentCandidate(pageUrl: string, baseUrl: string) {
   const slug = segments.at(-1) ?? '';
   if (!slug || !/^[a-z0-9][a-z0-9-]{0,199}$/i.test(slug))
     return { supported: false, reason: 'slug_not_mappable' };
-  return { supported: true, slug, candidates: /^\/product-category\/[^/]+\/?$/.test(page.pathname) ? ['product_cat'] : ['posts', 'pages', 'product'] };
+  const path = page.pathname;
+  const candidates = /^\/product-category\/[^/]+\/?$/.test(path)
+    ? ['product_cat']
+    : /^\/category\/[^/]+\/?$/.test(path)
+      ? ['category']
+      : ['posts', 'pages', 'product'];
+  return { supported: true, slug, candidates };
 }
 
 /** Public read-only ID lookup; no application credentials needed. */
 async function wordpressPublicRead(baseUrl: string, route: string): Promise<Response> {
   const site = await wordpressConfigForProject(baseUrl);
   if (!site) throw new Error('wordpress_not_enabled');
-  if (!/^\/wp-json\/wp\/v2\/(posts|pages|product|product_cat)\?/.test(route))
+  if (!/^\/wp-json\/wp\/v2\/(posts|pages|product|product_cat|categories)\?/.test(route))
     throw new Error('wordpress_invalid_route');
   return fetch(`${site}${route}`, {
     method: 'GET',
@@ -246,7 +252,7 @@ export async function wordpressIssueMapping(baseUrl: string, pageUrl: string) {
   for (const type of candidate.candidates) {
     const response = await wordpressPublicRead(
       baseUrl,
-      `/wp-json/wp/v2/${type}?slug=${encodeURIComponent(candidate.slug)}&_fields=id,link&per_page=10`,
+      `/wp-json/wp/v2/${type === 'category' ? 'categories' : type}?slug=${encodeURIComponent(candidate.slug)}&_fields=id,link&per_page=10`,
     );
     if (response.status === 404 || response.status === 403) continue;
     if (!response.ok) throw new Error(`wordpress_mapping_http_${response.status}`);
@@ -289,7 +295,7 @@ async function bridgeRequest(
   const connection = await wordpressConnection(baseUrl);
   if (!site || !connection) throw new Error('wordpress_connection_not_configured');
   if (
-    !['posts', 'pages', 'product', 'product_cat'].includes(targetType) ||
+    !['posts', 'pages', 'product', 'product_cat', 'category'].includes(targetType) ||
     !Number.isSafeInteger(targetId) ||
     targetId < 1
   )
