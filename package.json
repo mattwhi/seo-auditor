@@ -6,7 +6,7 @@
   "scripts": {
     "dev:prepare": "pnpm --filter './packages/*' build",
     "dev": "pnpm dev:prepare && pnpm --parallel --filter @seo-auditor/api --filter @seo-auditor/web --filter @seo-auditor/worker dev",
-    "build": "pnpm --filter ./packages/* build && pnpm --filter @seo-auditor/api --filter @seo-auditor/worker --filter @seo-auditor/web build",
+    "build": "pnpm dev:prepare && pnpm --filter @seo-auditor/api --filter @seo-auditor/worker --filter @seo-auditor/web build",
     "test": "pnpm -r test",
     "typecheck": "pnpm --filter './packages/*' build && pnpm -r typecheck",
     "lint": "eslint .",
