@@ -174,7 +174,7 @@ const proposalInput = z
   .object({
     auditId: z.string().min(1),
     issueId: z.string().min(1),
-    targetType: z.enum(['posts', 'pages', 'product', 'product_cat']),
+    targetType: z.enum(['posts', 'pages', 'product', 'product_cat', 'category']),
     targetId: z.number().int().positive(),
     proposedText: z.string().trim().min(3).max(500),
   })
