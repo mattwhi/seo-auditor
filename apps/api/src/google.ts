@@ -158,12 +158,13 @@ export async function searchConsoleKeywordOpportunities(baseUrl: string, startDa
   const { keywordCandidates } = await import('@seo-auditor/intelligence');
   const opportunities = keywordCandidates(observations)
     .sort((a, b) => b.score - a.score || b.impressions - a.impressions)
-    .slice(0, 100)
+    .slice(0, 500)
     .map(({ fingerprint, ...candidate }) => ({ ...candidate, id: fingerprint }));
   return {
     startDate, endDate, property: site,
     observationCount: observations.length,
+    observations,
     opportunities,
-    note: 'Advisory candidates from up to 1,000 GSC query/page rows. Not a traffic forecast; data may be anonymised or incomplete. No site or database changes are made.',
+    note: 'Read-only analysis of up to 1,000 GSC query/page rows. Low-volume candidates carry lower confidence. Search Console data may be anonymised or incomplete; no uplift is guaranteed.',
   };
 }
