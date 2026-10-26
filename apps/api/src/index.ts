@@ -6,7 +6,7 @@ import { db, getApplicationSettings } from '@seo-auditor/database';
 import { loadConfig } from '@seo-auditor/config';
 import { makeAuditQueue } from '@seo-auditor/queue';
 import { compareAudits } from '@seo-auditor/comparison';
-import { googleStatusForProject, searchConsoleReport, analyticsReport } from './google.js';
+import { googleStatusForProject, searchConsoleReport, analyticsReport, searchConsoleKeywordOpportunities } from './google.js';
 import {
   proposalExecutionError,
   preflightExecutionError,
@@ -85,6 +85,21 @@ for (const [kind, reporter] of [
     }
   });
 }
+// v1.2.1: read-only keyword opportunity analysis, via the authenticated web proxy.
+app.get('/api/v1/projects/:projectId/intelligence/keyword-opportunities', async (req, reply) => {
+  const { projectId } = z.object({ projectId: z.string().min(1) }).parse(req.params);
+  const dates = googleDates.safeParse(req.query);
+  if (!dates.success) return reply.code(400).send({ error: 'invalid_date_range' });
+  const project = await googleProject(projectId);
+  if (!project) return reply.code(404).send({ error: 'project_not_found' });
+  try {
+    return await searchConsoleKeywordOpportunities(project.baseUrl, dates.data.startDate, dates.data.endDate);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'google_request_failed';
+    req.log.warn({ code, projectId }, 'Keyword opportunity analysis failed');
+    return reply.code(code.includes('not_configured') || code.includes('credentials_missing') ? 409 : 502).send({ error: code });
+  }
+});
 // v0.8: opt-in public WordPress discovery and draft-only remediation guidance.
 // No write/approval endpoints until operator authentication and scoped permissions exist.
 app.get('/api/v1/projects/:projectId/wordpress/status', async (req, reply) => {

@@ -43,6 +43,7 @@ export default function AppNavigation() {
       <Link href="/" className="app-navigation-brand"><span className="app-brand-mark">◈</span> SEO Auditor</Link>
       <div className="app-navigation-links">
         <Link href="/" className={pathname === '/' ? 'nav-active' : ''}>Dashboard</Link>
+        <Link href="/intelligence" className={pathname.startsWith('/intelligence') ? 'nav-active' : ''}>Intelligence</Link>
         {admin && <>
           <span className="app-nav-divider" aria-hidden="true" />
           <span className="app-nav-section">Administration</span>

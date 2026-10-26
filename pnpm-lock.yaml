@@ -41,6 +41,9 @@ importers:
       '@seo-auditor/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@seo-auditor/intelligence':
+        specifier: workspace:*
+        version: link:../../packages/intelligence
       '@seo-auditor/logger':
         specifier: workspace:*
         version: link:../../packages/logger
