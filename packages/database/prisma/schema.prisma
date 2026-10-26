@@ -20,6 +20,9 @@ model Project {
   aiSettings  ProjectAiSettings?
   aiAnalyses  AiAnalysis[]
   aiReviews   AiRemediationReview[]
+  competitors IntelligenceCompetitor[]
+  keywordObservations IntelligenceKeywordObservation[]
+  opportunities IntelligenceOpportunity[]
 }
 
 model Audit {
@@ -389,4 +392,63 @@ model AiRemediationReview {
 
   @@unique([analysisId, suggestionIndex])
   @@index([projectId, status])
+}
+
+// v1.2.0: Intelligence is advisory; none of these records authorise remediation.
+model IntelligenceCompetitor {
+  id        String   @id @default(cuid())
+  projectId String
+  domain    String
+  label     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, domain])
+  @@index([projectId, createdAt])
+}
+
+model IntelligenceKeywordObservation {
+  id          String   @id @default(cuid())
+  projectId   String
+  query       String
+  pageUrl     String
+  source      String   @default("search_console")
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+  clicks      Int
+  impressions Int
+  ctr         Float
+  position    Float
+  observedAt  DateTime @default(now())
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, source, query, pageUrl, periodStart, periodEnd])
+  @@index([projectId, periodEnd])
+  @@index([projectId, pageUrl])
+}
+
+model IntelligenceOpportunity {
+  id             String    @id @default(cuid())
+  projectId      String
+  kind           String
+  status         String    @default("open")
+  pageUrl        String?
+  keyword        String?
+  title          String
+  rationale      String    @db.Text
+  evidence       Json
+  evidenceSource String
+  impact         Int
+  confidence     Int
+  effort         Int
+  score          Int
+  fingerprint    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  project        Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, fingerprint])
+  @@index([projectId, status, score])
+  @@index([projectId, kind])
 }
