@@ -83,10 +83,10 @@ export async function crawlSite(startUrl: string, options: CrawlOptions): Promis
   });
 
   const queue = new CrawlQueue({ maxDepth, maxSize: maxQueueSize });
-  queue.enqueue(normalizedStartUrl, 0);
+  if (!isNonContentUtilityUrl(normalizedStartUrl)) queue.enqueue(normalizedStartUrl, 0);
 
   for (const sitemapUrl of sitemapUrls) {
-    queue.enqueue(sitemapUrl, 0);
+    if (!isNonContentUtilityUrl(sitemapUrl)) queue.enqueue(sitemapUrl, 0);
   }
 
   const pages: PageFacts[] = [];
@@ -99,6 +99,7 @@ export async function crawlSite(startUrl: string, options: CrawlOptions): Promis
     while (batch.length < concurrency && queue.size > 0 && attemptedUrls < options.maxUrls) {
       const entry = queue.dequeue();
       if (!entry) break;
+      if (isNonContentUtilityUrl(entry.url)) continue;
 
       if (robotsPolicy && !isAllowedByRobots(entry.url, robotsPolicy, options.userAgent)) {
         continue;
