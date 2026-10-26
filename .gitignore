@@ -13,7 +13,7 @@ coverage/
 .env.*
 !.env.example
 !.env.*.example
-
+*.dump
 # Logs
 *.log
 npm-debug.log*
