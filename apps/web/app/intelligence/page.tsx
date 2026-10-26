@@ -14,6 +14,22 @@ type Observation = {
 };
 type Kind = 'low_ctr' | 'striking_distance' | 'page_two' | 'emerging';
 type Opportunity = Observation & { id: string; kind: Kind; score: number; confidence: number };
+type ExplorerRow = Observation | Opportunity;
+const PAGE_SIZE = 25;
+function confidenceLabel(impressions: number) {
+  return impressions >= 100 ? 'High' : impressions >= 30 ? 'Medium' : 'Low';
+}
+function keywordTopic(query: string) {
+  const q = query.toLowerCase();
+  if (/training|recall|puppy/.test(q)) return 'Training & puppies';
+  if (/beef|liver|tripe/.test(q)) return 'Beef treats';
+  if (/duck/.test(q)) return 'Duck treats';
+  if (/venison/.test(q)) return 'Venison treats';
+  if (/rabbit/.test(q)) return 'Rabbit treats';
+  if (/lamb/.test(q)) return 'Lamb treats';
+  if (/natural|organic/.test(q)) return 'Natural treats';
+  return 'Other queries';
+}
 type Report = {
   startDate: string;
   endDate: string;
@@ -50,11 +66,13 @@ export default function IntelligencePage() {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'opportunities' | 'all'>('opportunities');
+  const [tab, setTab] = useState<'opportunities' | 'all'>('all');
   const [kind, setKind] = useState('all');
   const [search, setSearch] = useState('');
   const [minImpressions, setMinImpressions] = useState(0);
-  const [sort, setSort] = useState('priority');
+  const [sort, setSort] = useState('impressions');
+  const [topic, setTopic] = useState('all');
+  const [page, setPage] = useState(1);
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/backend/v1/projects', { cache: 'no-store', signal: controller.signal })
@@ -95,8 +113,11 @@ export default function IntelligencePage() {
               : (data.error ?? `Analysis failed (${response.status})`),
         );
       setReport(data);
-      setTab('opportunities');
+      setTab('all');
       setKind('all');
+      setTopic('all');
+      setSort('impressions');
+      setPage(1);
       setSearch('');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Analysis failed');
@@ -106,12 +127,13 @@ export default function IntelligencePage() {
   }
   const filtered = useMemo(() => {
     if (!report) return [];
-    const rows = tab === 'opportunities' ? report.opportunities : (report.observations ?? []);
+    const rows: ExplorerRow[] = tab === 'opportunities' ? report.opportunities : (report.observations ?? []);
     const q = search.trim().toLowerCase();
     return rows
       .filter(
         (row) =>
           row.impressions >= minImpressions &&
+          (topic === 'all' || keywordTopic(row.query) === topic) &&
           (!q || `${row.query} ${row.pageUrl}`.toLowerCase().includes(q)) &&
           (tab === 'all' || kind === 'all' || ('kind' in row && row.kind === kind)),
       )
@@ -131,11 +153,25 @@ export default function IntelligencePage() {
                   ? b.score - a.score
                   : b.impressions - a.impressions,
       );
-  }, [report, tab, kind, search, minImpressions, sort]);
+  }, [report, tab, kind, topic, search, minImpressions, sort]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visibleRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const positionBuckets = useMemo(() => {
+    const counts = [0, 0, 0, 0];
+    for (const row of report?.observations ?? []) {
+      if (row.position <= 10) counts[0]++;
+      else if (row.position <= 20) counts[1]++;
+      else if (row.position <= 50) counts[2]++;
+      else counts[3]++;
+    }
+    return counts;
+  }, [report]);
+  const topics = useMemo(() => Array.from(new Set((report?.observations ?? []).map(row => keywordTopic(row.query)))).sort(), [report]);
   return (
     <main className="intelligence-page">
       <header className="intelligence-header">
-        <span className="intelligence-eyebrow">SEO Auditor / Intelligence / v1.2.1.1</span>
+        <span className="intelligence-eyebrow">SEO Auditor / Intelligence / v1.2.1.2</span>
         <h1>Keyword opportunities</h1>
         <p>
           Find opportunities in your Google Search Console data, including lower-volume and page-two
@@ -218,6 +254,20 @@ export default function IntelligencePage() {
               <strong className="intelligence-property">{report.property}</strong>
             </div>
           </div>
+          <section className="intelligence-panel" aria-label="Ranking position distribution">
+            <h2>Ranking position distribution</h2>
+            <p className="intelligence-muted">Distribution of returned query/page observations. These are not unique keywords.</p>
+            <div className="intelligence-distribution">
+              {['1–10', '11–20', '21–50', '51+'].map((label, index) => {
+                const count = positionBuckets[index];
+                const total = report.observations.length;
+                return <div key={label} className="intelligence-distribution-item">
+                  <div className="intelligence-distribution-label"><strong>Position {label}</strong><span>{count} rows · {total ? Math.round(count / total * 100) : 0}%</span></div>
+                  <div className="intelligence-distribution-track"><div style={{ width: `${total ? count / total * 100 : 0}%` }} /></div>
+                </div>;
+              })}
+            </div>
+          </section>
           <section className="intelligence-panel">
             <div className="intelligence-section-heading">
               <div>
@@ -234,7 +284,7 @@ export default function IntelligencePage() {
                 role="tab"
                 aria-selected={tab === 'opportunities'}
                 className={tab === 'opportunities' ? 'active' : ''}
-                onClick={() => setTab('opportunities')}
+                onClick={() => { setTab('opportunities'); setSort('priority'); setPage(1); }}
               >
                 Opportunities ({report.opportunities.length})
               </button>
@@ -243,7 +293,7 @@ export default function IntelligencePage() {
                 role="tab"
                 aria-selected={tab === 'all'}
                 className={tab === 'all' ? 'active' : ''}
-                onClick={() => setTab('all')}
+                onClick={() => { setTab('all'); setSort('impressions'); setPage(1); }}
               >
                 All GSC rows ({report.observationCount})
               </button>
@@ -253,14 +303,14 @@ export default function IntelligencePage() {
                 Search keyword or page
                 <input
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                   placeholder="Search keywords or URLs"
                 />
               </label>
               {tab === 'opportunities' && (
                 <label>
                   Opportunity type
-                  <select value={kind} onChange={(e) => setKind(e.target.value)}>
+                  <select value={kind} onChange={(e) => { setKind(e.target.value); setPage(1); }}>
                     <option value="all">All types</option>
                     {Object.entries(kindLabels).map(([value, label]) => (
                       <option key={value} value={value}>
@@ -271,18 +321,25 @@ export default function IntelligencePage() {
                 </label>
               )}
               <label>
+                Keyword topic
+                <select value={topic} onChange={(e) => { setTopic(e.target.value); setPage(1); }}>
+                  <option value="all">All topics</option>
+                  {topics.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </label>
+              <label>
                 Min. impressions
                 <input
                   type="number"
                   min="0"
                   step="1"
                   value={minImpressions}
-                  onChange={(e) => setMinImpressions(Math.max(0, Number(e.target.value) || 0))}
+                  onChange={(e) => { setMinImpressions(Math.max(0, Number(e.target.value) || 0)); setPage(1); }}
                 />
               </label>
               <label>
                 Sort by
-                <select value={sort} onChange={(e) => setSort(e.target.value)}>
+                <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }}>
                   <option value="priority">
                     {tab === 'opportunities' ? 'Priority score' : 'Impressions'}
                   </option>
@@ -303,11 +360,13 @@ export default function IntelligencePage() {
                     <th>Impressions</th>
                     <th>CTR</th>
                     <th>Position</th>
+                    <th>Topic</th>
+                    <th>Confidence</th>
                     {tab === 'opportunities' && <th>Priority</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((o, i) => {
+                  {visibleRows.map((o, i) => {
                     const opportunity = 'kind' in o ? (o as Opportunity) : null;
                     const href = validUrl(o.pageUrl);
                     return (
@@ -333,6 +392,8 @@ export default function IntelligencePage() {
                         <td>{o.impressions.toLocaleString()}</td>
                         <td>{(o.ctr * 100).toFixed(2)}%</td>
                         <td>{o.position.toFixed(1)}</td>
+                        <td>{keywordTopic(o.query)}</td>
+                        <td><span className={`intelligence-confidence intelligence-confidence-${confidenceLabel(o.impressions).toLowerCase()}`} title="Confidence is based on impression volume, not statistical significance">{confidenceLabel(o.impressions)}</span></td>
                         {tab === 'opportunities' && (
                           <td>
                             <span className="intelligence-score">
@@ -349,6 +410,16 @@ export default function IntelligencePage() {
                 </tbody>
               </table>
             </div>
+            {filtered.length > PAGE_SIZE && (
+              <nav className="intelligence-pagination" aria-label="Keyword pages">
+                <span>Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length}</span>
+                <div>
+                  <button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Previous</button>
+                  <span>Page {currentPage} of {pageCount}</span>
+                  <button type="button" disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
+                </div>
+              </nav>
+            )}
             {filtered.length === 0 && (
               <p className="intelligence-no-results">
                 No rows match these filters. Try a lower minimum impression count, or open the All
