@@ -134,3 +134,36 @@ export async function analyticsReport(baseUrl: string, startDate: string, endDat
   const data = await googlePost(baseUrl, `https://analyticsdata.googleapis.com/v1beta/properties/${property}:runReport`, { dateRanges: [{ startDate, endDate }], dimensions: [{ name: 'landingPagePlusQueryString' }], metrics: [{ name: 'sessions' }, { name: 'totalUsers' }, { name: 'engagedSessions' }], limit: 100 }) as { rows?: Array<{ dimensionValues?: Array<{ value?: string }>; metricValues?: Array<{ value?: string }> }> };
   return { startDate, endDate, propertyId: property, pages: (data.rows ?? []).map((row) => ({ page: row.dimensionValues?.[0]?.value ?? '', sessions: Number(row.metricValues?.[0]?.value ?? 0), users: Number(row.metricValues?.[1]?.value ?? 0), engagedSessions: Number(row.metricValues?.[2]?.value ?? 0) })), note: 'GA4 sessions include all traffic channels. The returned rows are limited to the top 100 landing pages.' };
 }
+
+
+/** v1.2.1: live, read-only GSC keyword/page observations.
+ * No database writes, migrations, or automated remediation.
+ */
+export async function searchConsoleKeywordOpportunities(baseUrl: string, startDate: string, endDate: string) {
+  const site = (await effectiveGoogleConfig(baseUrl)).searchConsoleSiteUrl;
+  if (!site) throw new Error('search_console_not_configured');
+  const response = await googlePost(
+    baseUrl,
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(site)}/searchAnalytics/query`,
+    { startDate, endDate, dimensions: ['query', 'page'], rowLimit: 1000, dataState: 'final' },
+  ) as { rows?: Array<{ keys?: string[]; clicks?: number; impressions?: number; ctr?: number; position?: number }> };
+  const observations = (response.rows ?? []).map((row) => ({
+    query: row.keys?.[0] ?? '',
+    pageUrl: row.keys?.[1] ?? '',
+    clicks: row.clicks ?? 0,
+    impressions: row.impressions ?? 0,
+    ctr: row.ctr ?? 0,
+    position: row.position ?? 0,
+  }));
+  const { keywordCandidates } = await import('@seo-auditor/intelligence');
+  const opportunities = keywordCandidates(observations)
+    .sort((a, b) => b.score - a.score || b.impressions - a.impressions)
+    .slice(0, 100)
+    .map(({ fingerprint, ...candidate }) => ({ ...candidate, id: fingerprint }));
+  return {
+    startDate, endDate, property: site,
+    observationCount: observations.length,
+    opportunities,
+    note: 'Advisory candidates from up to 1,000 GSC query/page rows. Not a traffic forecast; data may be anonymised or incomplete. No site or database changes are made.',
+  };
+}
