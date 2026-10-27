@@ -26,7 +26,6 @@ COMPOSE=(
   -f compose.remediation.yml
   -f compose.remediation-web.yml
   -f compose.production.yml
-  -f compose.ghcr.yml
 )
 
 echo "========================================"
@@ -37,6 +36,23 @@ echo "========================================"
 # Pull the exact image built by GitHub Actions.
 echo "Pulling Docker images..."
 "${COMPOSE[@]}" pull migrate api worker web
+
+# Pre-deploy database backup and additive Prisma migrations.
+# The maintenance service uses the same immutable image and production DATABASE_URL.
+echo "Checking PostgreSQL readiness..."
+"${COMPOSE[@]}" up -d --no-build postgres
+BACKUP_DIR="$APP_DIR/.runtime/backups"
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+BACKUP_FILE="$BACKUP_DIR/pre-deploy-${IMAGE_TAG}-$(date -u +%Y%m%dT%H%M%SZ).dump"
+echo "Backing up production database..."
+"${COMPOSE[@]}" exec -T postgres pg_dump -U seo -d seo_auditor -Fc > "$BACKUP_FILE"
+test -s "$BACKUP_FILE"
+"${COMPOSE[@]}" exec -T postgres pg_restore -l < "$BACKUP_FILE" > /dev/null
+chmod 600 "$BACKUP_FILE"
+echo "Backup verified: $BACKUP_FILE"
+echo "Applying Prisma migrations before application rollout..."
+"${COMPOSE[@]}" --profile maintenance run --rm --no-deps migrate
 
 # Recreate application containers using the pulled image.
 # Database and Redis volumes remain intact.
