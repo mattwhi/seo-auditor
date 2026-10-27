@@ -23,6 +23,7 @@ model Project {
   competitors IntelligenceCompetitor[]
   keywordObservations IntelligenceKeywordObservation[]
   opportunities IntelligenceOpportunity[]
+  serpObservations IntelligenceSerpObservation[]
 }
 
 model Audit {
@@ -403,6 +404,7 @@ model IntelligenceCompetitor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  serpObservations IntelligenceSerpObservation[]
 
   @@unique([projectId, domain])
   @@index([projectId, createdAt])
@@ -451,4 +453,23 @@ model IntelligenceOpportunity {
   @@unique([projectId, fingerprint])
   @@index([projectId, status, score])
   @@index([projectId, kind])
+}
+
+// v1.2.3: externally supplied SERP observations, never inferred from GSC.
+model IntelligenceSerpObservation {
+  id           String   @id @default(cuid())
+  projectId    String
+  competitorId String
+  keyword      String
+  position     Int
+  resultUrl    String?
+  source       String
+  observedOn   DateTime @db.Date
+  createdAt    DateTime @default(now())
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  competitor   IntelligenceCompetitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, competitorId, keyword, source, observedOn])
+  @@index([projectId, keyword])
+  @@index([competitorId, observedOn])
 }
