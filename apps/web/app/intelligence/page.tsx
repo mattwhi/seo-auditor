@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import './intelligence.css';
 
 type Project = { id: string; name: string; baseUrl: string };
@@ -173,6 +174,7 @@ export default function IntelligencePage() {
       <header className="intelligence-header">
         <span className="intelligence-eyebrow">SEO Auditor / Intelligence / v1.2.1.2</span>
         <h1>Keyword opportunities</h1>
+        <div className="competitor-links"><Link href="/intelligence/competitors">Competitor intelligence →</Link></div>
         <p>
           Find opportunities in your Google Search Console data, including lower-volume and page-two
           keywords. Read-only recommendations — no automatic changes.
